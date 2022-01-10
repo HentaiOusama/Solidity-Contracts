@@ -15,7 +15,13 @@ library AddressUtils {
 interface ERC165 {
   function supportsInterface(bytes4 _interfaceID) external view returns (bool);
 }
+interface ERC721Metadata {
+  function name() external view returns (string memory _name);
 
+  function symbol() external view returns (string memory _symbol);
+
+  function tokenURI(uint256 _tokenId) external view returns (string memory);
+}
 interface ERC721 {
   event Transfer(
     address indexed _from,
@@ -53,17 +59,8 @@ interface ERC721 {
 
   function isApprovedForAll(address _owner, address _operator) external view returns (bool);
 }
-
 interface ERC721TokenReceiver {
   function onERC721Received(address _operator, address _from, uint256 _tokenId, bytes calldata _data) external returns (bytes4);
-}
-
-interface ERC721Metadata {
-  function name() external view returns (string memory _name);
-
-  function symbol() external view returns (string memory _symbol);
-
-  function tokenURI(uint256 _tokenId) external view returns (string memory);
 }
 
 
@@ -78,7 +75,6 @@ contract SupportsInterface is ERC165 {
     return supportedInterfaces[_interfaceID];
   }
 }
-
 contract NFToken is ERC721, SupportsInterface {
   using AddressUtils for address;
 
@@ -238,7 +234,6 @@ contract NFToken is ERC721, SupportsInterface {
     delete idToApproval[_tokenId];
   }
 }
-
 contract NFTokenMetadata is NFToken, ERC721Metadata {
   string internal nftName;
   string internal nftSymbol;
@@ -285,7 +280,6 @@ abstract contract Context {
     return msg.data;
   }
 }
-
 contract Ownable is Context {
   address private _owner;
 
@@ -314,7 +308,6 @@ contract Ownable is Context {
 }
 
 contract DesignVaultNFT is NFTokenMetadata, Ownable {
-
   constructor() {
     nftName = "Design Vault NFT";
     nftSymbol = "DV-NFT";
