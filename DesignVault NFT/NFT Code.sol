@@ -306,14 +306,34 @@ contract Ownable is Context {
     _owner = newOwner;
   }
 }
+contract Authorizable is Ownable {
+  mapping(address => bool) private authorized;
 
-contract DesignVaultNFT is NFTokenMetadata, Ownable {
+  constructor () {
+    authorized[owner()] = true;
+  }
+
+  modifier onlyAuthorized() {
+    require(authorized[_msgSender()], "Only for authorized personnel");
+    _;
+  }
+
+  function setAuthorization(address _address, bool shouldAuthorize) external onlyOwner() {
+    authorized[_address] = shouldAuthorize;
+  }
+
+  function isAuthorized(address _address) external view returns (bool) {
+    return authorized[_address];
+  }
+}
+
+contract DesignVaultNFT is NFTokenMetadata, Authorizable {
   constructor() {
     nftName = "Design Vault NFT";
     nftSymbol = "DV-NFT";
   }
 
-  function mint(address _to, uint256 _tokenId, string calldata _uri) external onlyOwner() {
+  function mint(address _to, uint256 _tokenId, string calldata _uri) external onlyAuthorized() {
     super._mint(_to, _tokenId);
     super._setTokenUri(_tokenId, _uri);
   }
