@@ -778,8 +778,6 @@ contract TIKI is ERC20, Ownable {
 
   TIKIDividendTracker public dividendTracker;
 
-  address public liquidityWallet;
-
   uint256 public maxSellTransactionAmount = 1000000 * (10 ** 18);
   uint256 public swapTokensAtAmount = 200000 * (10 ** 18);
 
@@ -828,8 +826,6 @@ contract TIKI is ERC20, Ownable {
 
   event SetAutomatedMarketMakerPair(address indexed pair, bool indexed value);
 
-  event LiquidityWalletUpdated(address indexed newLiquidityWallet, address indexed oldLiquidityWallet);
-
   event GasForProcessingUpdated(uint256 indexed newValue, uint256 indexed oldValue);
 
   event FixedSaleBuy(address indexed account, uint256 indexed amount, bool indexed earlyParticipant, uint256 numberOfBuyers);
@@ -865,8 +861,6 @@ contract TIKI is ERC20, Ownable {
 
     dividendTracker = new TIKIDividendTracker();
 
-    liquidityWallet = owner();
-
 
     IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
     address _uniswapV2Pair = IUniswapV2Factory(_uniswapV2Router.factory())
@@ -888,7 +882,6 @@ contract TIKI is ERC20, Ownable {
     dividendTracker.excludeFromDividends(_bounceFixedSaleWallet);
 
     // Exclude from paying fees or having max transaction amount
-    excludeFromFees(liquidityWallet, true);
     excludeFromFees(address(this), true);
 
     // Enable owner and fixed-sale wallet to send tokens before presales are over
@@ -962,13 +955,6 @@ contract TIKI is ERC20, Ownable {
     }
 
     emit SetAutomatedMarketMakerPair(pair, value);
-  }
-
-  function updateLiquidityWallet(address newLiquidityWallet) public onlyOwner {
-    require(newLiquidityWallet != liquidityWallet, "TIKI: The liquidity wallet is already this address");
-    excludeFromFees(newLiquidityWallet, true);
-    emit LiquidityWalletUpdated(newLiquidityWallet, liquidityWallet);
-    liquidityWallet = newLiquidityWallet;
   }
 
   function updateGasForProcessing(uint256 newValue) public onlyOwner {
@@ -1111,8 +1097,8 @@ contract TIKI is ERC20, Ownable {
       canSwap &&
       !swapping &&
       !automatedMarketMakerPairs[from] &&
-      from != liquidityWallet &&
-      to != liquidityWallet
+      from != owner() &&
+      to != owner()
     ) {
       swapping = true;
 
@@ -1202,7 +1188,7 @@ contract TIKI is ERC20, Ownable {
       tokenAmount,
       0,
       0,
-      liquidityWallet,
+      address(0),
       block.timestamp
     );
 
