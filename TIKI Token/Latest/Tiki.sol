@@ -835,20 +835,15 @@ contract TIKI is ERC20, Ownable {
 
     uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
     uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).createPair(address(this), uniswapV2Router.WETH());
-
     _setAutomatedMarketMakerPair(uniswapV2Pair, true);
 
-    // Exclude from receiving dividends
     dividendTracker.excludeFromDividends(address(dividendTracker));
     dividendTracker.excludeFromDividends(address(this));
     dividendTracker.excludeFromDividends(address(0));
     dividendTracker.excludeFromDividends(owner());
     dividendTracker.excludeFromDividends(address(uniswapV2Router));
 
-    // Exclude from paying fees or having max transaction amount
     excludeFromFees(address(this), true);
-
-    // Enable owner and fixed-sale wallet to send tokens before presales are over
     canTransferBeforeTradingIsEnabled[owner()] = true;
 
     swapTokensAtAmount = 200000 * (10 ** decimals());
@@ -890,10 +885,9 @@ contract TIKI is ERC20, Ownable {
 
     bool canSwap = contractTokenBalance >= swapTokensAtAmount;
     if (
-      tradingIsEnabled &&
-      canSwap && !swapping &&
-    !automatedMarketMakerPairs[from] &&
-    from != owner() && to != owner()
+      tradingIsEnabled && canSwap && !swapping &&
+      !automatedMarketMakerPairs[from] &&
+      from != owner() && to != owner()
     ) {
       swapping = true;
 
