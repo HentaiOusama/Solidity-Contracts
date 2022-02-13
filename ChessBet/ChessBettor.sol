@@ -323,7 +323,7 @@ contract ChessBettor is Ownable {
 
   function claimRewardsFor(address _address) internal {
 
-    (uint256 reward, uint256 fees, string[] memory claimedGames, int8[] memory results) = calculateRewards(_address);
+    (uint256 reward, uint256 fees, uint256[] memory claimedGames, int8[] memory results) = calculateRewards(_address);
 
     updateAllClaimedVotesAndListOfUnclaimedVotes(_address, claimedGames, results);
     takeFee(fees);
@@ -332,31 +332,30 @@ contract ChessBettor is Ownable {
     emit rewardWithdraw(_address, reward);
   }
 
-  function updateAllClaimedVotesAndListOfUnclaimedVotes(address _address, string[] memory toBeClaimedGames, int8[] memory results) internal {
-    uint256 currentIndex = 0;
-    uint256 max = toBeClaimedGames.length;
+  function updateAllClaimedVotesAndListOfUnclaimedVotes(address _address, uint256[] memory toBeClaimedGamesIndices, int8[] memory results) internal {
+    uint256 max = toBeClaimedGamesIndices.length;
     string[] storage unclaimedGames = allPlayerData[_address].gamesWithUnclaimedBalance;
+    uint256 lastIndex = unclaimedGames.length - 1;
     UserData storage userData = allPlayerData[_address];
 
-    for (uint256 i = 0; i < unclaimedGames.length; i++) {
-      unclaimedGames[i - currentIndex] = unclaimedGames[i];
+    for (uint256 i = max - 1; (i >= 0) && (i < max) ; i--) {
+      uint256 currentIndex = toBeClaimedGamesIndices[i];
 
-      if ((currentIndex < max) && (areStringsEqual(unclaimedGames[i], toBeClaimedGames[currentIndex]))) {
-        Game storage game = existingGames[toBeClaimedGames[currentIndex]];
-        game.voteList[game.aI][game.voteIndex[game.aI][_address]].claimed = true;
+      Game storage game = existingGames[unclaimedGames[currentIndex]];
+      game.voteList[game.aI][game.voteIndex[game.aI][_address]].claimed = true;
 
-        userData.undetermined -= 1;
-        if (results[currentIndex] == 0) {
-          userData.draws = userData.draws.add(1);
-        } else if (results[currentIndex] == 1) {
-          userData.wins = userData.wins.add(1);
-        } else if (results[currentIndex] == - 1) {
-          userData.losses = userData.losses.add(1);
-        }
-        // results[currentIndex] == - 2  =>  Invalid Game Id. Do nothing, just pop.
-
-        currentIndex++;
+      userData.undetermined -= 1;
+      if (results[currentIndex] == 0) {
+        userData.draws = userData.draws.add(1);
+      } else if (results[currentIndex] == 1) {
+        userData.wins = userData.wins.add(1);
+      } else if (results[currentIndex] == - 1) {
+        userData.losses = userData.losses.add(1);
       }
+      // results[currentIndex] == - 2  =>  Invalid Game Id. Do nothing, just pop.
+
+      unclaimedGames[currentIndex] = unclaimedGames[lastIndex];
+      lastIndex--;
     }
 
     for (uint256 i = 0; i < max; i++) {
@@ -529,25 +528,26 @@ contract ChessBettor is Ownable {
     return (returnableGameData, _game.voteList[_game.aI]);
   }
 
-  function calculateRewards(address _address) public view returns (uint256 claimableReward, uint256 fees, string[] memory removableGames, int8[] memory results) {
+  function calculateRewards(address _address) public view returns (uint256 claimableReward, uint256 fees, uint256[] memory removableGames, int8[] memory results) {
     uint256 nonTaxableReward = 0;
     uint256 index = 0;
     string[] storage unclaimedGameIds = allPlayerData[_address].gamesWithUnclaimedBalance;
 
     // Get all the gameIds in which player has participated.
     uint256 size = getCountOfClaimableGamesForAddress(_address, unclaimedGameIds);
-    removableGames = new string[](size);
+    removableGames = new uint256[](size);
     results = new int8[](size);
 
-    for (uint i = 0; i < unclaimedGameIds.length; i++) {
+    for (uint256 i = 0; i < unclaimedGameIds.length; i++) {
       Game storage game = existingGames[unclaimedGameIds[i]];
       if (game.voteList[game.aI].length < 1) {
+        removableGames[index] = i;
         results[index] = - 2;
       } else {
         Vote storage vote = game.voteList[game.aI][game.voteIndex[game.aI][_address]];
 
         if (!game.gameExists || !(game.isOn || vote.claimed)) {
-          removableGames[index] = unclaimedGameIds[i];
+          removableGames[index] = i;
 
           if (!game.gameExists) {
             results[index] = - 2;
