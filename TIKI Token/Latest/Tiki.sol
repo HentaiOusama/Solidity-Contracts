@@ -776,7 +776,7 @@ contract TIKI is ERC20, Ownable {
 
   TIKIDividendTracker public dividendTracker;
 
-  uint256 public swapTokensAtAmount = 200000 * (10 ** 18);
+  uint256 public swapTokensAtAmount;
 
   uint256 public immutable BNBRewardsFee;
   uint256 public immutable liquidityFee;
@@ -826,7 +826,7 @@ contract TIKI is ERC20, Ownable {
     address indexed processor
   );
 
-  constructor() ERC20("TIKI", "TIKI", 18) {
+  constructor(string memory _tokenName, string memory _tokenSymbol, uint8 _decimals) ERC20(_tokenName, _tokenSymbol, _decimals) {
     uint256 _BNBRewardsFee = 10;
     uint256 _liquidityFee = 5;
 
@@ -834,7 +834,7 @@ contract TIKI is ERC20, Ownable {
     liquidityFee = _liquidityFee;
     totalFees = _BNBRewardsFee.add(_liquidityFee);
 
-    dividendTracker = new TIKIDividendTracker();
+    dividendTracker = new TIKIDividendTracker(decimals());
 
     IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
     address _uniswapV2Pair = IUniswapV2Factory(_uniswapV2Router.factory())
@@ -857,7 +857,8 @@ contract TIKI is ERC20, Ownable {
     // Enable owner and fixed-sale wallet to send tokens before presales are over
     canTransferBeforeTradingIsEnabled[owner()] = true;
 
-    _mint(owner(), 1000000000 * (10 ** 18));
+    swapTokensAtAmount = 200000 * (10 ** decimals());
+    _mint(owner(), 1000000000 * (10 ** decimals()));
   }
 
   receive() external payable {
@@ -1139,9 +1140,9 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
 
   event Claim(address indexed account, uint256 amount, bool indexed automatic);
 
-  constructor() DividendPayingToken("TIKI_Dividend_Tracker", "TIKI_Dividend_Tracker", 18) {
+  constructor(uint8 _decimals) DividendPayingToken("TIKI_Dividend_Tracker", "TIKI_Dividend_Tracker", _decimals) {
     claimWait = 3600;
-    minimumTokenBalanceForDividends = 10000 * (10 ** 18);
+    minimumTokenBalanceForDividends = 10000 * (10 ** decimals());
     // Must hold 10000+ tokens
   }
 
