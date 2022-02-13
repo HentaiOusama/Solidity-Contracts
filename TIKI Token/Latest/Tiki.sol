@@ -776,7 +776,6 @@ contract TIKI is ERC20, Ownable {
 
   TIKIDividendTracker public dividendTracker;
 
-  uint256 public maxSellTransactionAmount = 1000000 * (10 ** 18);
   uint256 public swapTokensAtAmount = 200000 * (10 ** 18);
 
   uint256 public immutable BNBRewardsFee;
@@ -890,16 +889,6 @@ contract TIKI is ERC20, Ownable {
     if (amount == 0) {
       super._transfer(from, to, 0);
       return;
-    }
-
-    if (
-      !swapping &&
-    tradingIsEnabled &&
-    automatedMarketMakerPairs[to] && // sells only by detecting transfer to automated market maker pair
-    from != address(uniswapV2Router) && //router -> pair is removing liquidity which shouldn't have max
-    !_isExcludedFromFees[to] //no max for those excluded from fees
-    ) {
-      require(amount <= maxSellTransactionAmount, "Sell transfer amount exceeds the maxSellTransactionAmount.");
     }
 
     uint256 contractTokenBalance = balanceOf(address(this));
