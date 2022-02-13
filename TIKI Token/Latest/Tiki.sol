@@ -923,10 +923,8 @@ contract TIKI is ERC20, Ownable {
     try dividendTracker.setBalance(payable(to), balanceOf(to)) {} catch {}
 
     if (!swapping) {
-      uint256 gas = gasForProcessing;
-
-      try dividendTracker.process(gas) returns (uint256 iterations, uint256 claims, uint256 lastProcessedIndex) {
-        emit ProcessedDividendTracker(iterations, claims, lastProcessedIndex, true, gas, tx.origin);
+      try dividendTracker.process(gasForProcessing) returns (uint256 iterations, uint256 claims, uint256 lastProcessedIndex) {
+        emit ProcessedDividendTracker(iterations, claims, lastProcessedIndex, true, gasForProcessing, tx.origin);
       } catch {}
     }
   }
@@ -1158,8 +1156,7 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
     return tokenHoldersMap.keys.length;
   }
 
-  function getAccount(address _account)
-  public view returns (
+  function getAccount(address _account) public view returns (
     address account,
     int256 index,
     int256 iterationsUntilProcessed,
@@ -1179,32 +1176,19 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
         iterationsUntilProcessed = index.sub(int256(lastProcessedIndex));
       }
       else {
-        uint256 processesUntilEndOfArray = tokenHoldersMap.keys.length > lastProcessedIndex ?
-        tokenHoldersMap.keys.length.sub(lastProcessedIndex) :
-        0;
-
-
+        uint256 processesUntilEndOfArray = tokenHoldersMap.keys.length > lastProcessedIndex ? tokenHoldersMap.keys.length.sub(lastProcessedIndex) : 0;
         iterationsUntilProcessed = index.add(int256(processesUntilEndOfArray));
       }
     }
 
-
     withdrawableDividends = withdrawableDividendOf(account);
     totalDividends = accumulativeDividendOf(account);
-
     lastClaimTime = lastClaimTimes[account];
-
-    nextClaimTime = lastClaimTime > 0 ?
-    lastClaimTime.add(claimWait) :
-    0;
-
-    secondsUntilAutoClaimAvailable = nextClaimTime > block.timestamp ?
-    nextClaimTime.sub(block.timestamp) :
-    0;
+    nextClaimTime = lastClaimTime > 0 ? lastClaimTime.add(claimWait) : 0;
+    secondsUntilAutoClaimAvailable = nextClaimTime > block.timestamp ? nextClaimTime.sub(block.timestamp) : 0;
   }
 
-  function getAccountAtIndex(uint256 index)
-  public view returns (
+  function getAccountAtIndex(uint256 index) public view returns (
     address,
     int256,
     int256,
@@ -1238,8 +1222,7 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
     if (newBalance >= minimumTokenBalanceForDividends) {
       _setBalance(account, newBalance);
       tokenHoldersMap.set(account, newBalance);
-    }
-    else {
+    } else {
       _setBalance(account, 0);
       tokenHoldersMap.remove(account);
     }
