@@ -772,8 +772,6 @@ contract TIKI is ERC20, Ownable {
   IUniswapV2Router02 public uniswapV2Router;
   address public immutable uniswapV2Pair;
 
-  address public immutable bounceFixedSaleWallet;
-
   bool private swapping;
 
   TIKIDividendTracker public dividendTracker;
@@ -789,27 +787,11 @@ contract TIKI is ERC20, Ownable {
 
   uint256 public gasForProcessing = 300000;
 
-  /*   Fixed Sale   */
-  // timestamp for when purchases on the fixed-sale are available to early participants
-  uint256 public immutable fixedSaleStartTimestamp = 1623960000;
-
-  // the fixed-sale will be open to the public 10 minutes after fixedSaleStartTimestamp,
-  // or after 600 buys, whichever comes first.
-  uint256 public immutable fixedSaleEarlyParticipantDuration = 600;
-  uint256 public immutable fixedSaleEarlyParticipantBuysThreshold = 600;
-
-  // track number of buys. once this reaches fixedSaleEarlyParticipantBuysThreshold,
-  // the fixed-sale will be open to the public even if it's still in the first 10 minutes
-  uint256 public numberOfFixedSaleBuys;
-  // track who has bought
-  mapping(address => bool) public fixedSaleBuyers;
-
   // timestamp for when the token can be traded freely on PancakeSwap
   uint256 public immutable tradingEnabledTimestamp = 1623967200; //June 17, 22:00 UTC, 2021
 
   mapping(address => bool) private _isExcludedFromFees;
   mapping(address => bool) private canTransferBeforeTradingIsEnabled;
-  mapping(address => bool) public fixedSaleEarlyParticipants;
 
   // store addresses that a automatic market maker pairs. Any transfer *to* these addresses
   // could be subject to a maximum transfer amount
@@ -820,15 +802,10 @@ contract TIKI is ERC20, Ownable {
   event UpdateUniswapV2Router(address indexed newAddress, address indexed oldAddress);
 
   event ExcludeFromFees(address indexed account, bool isExcluded);
-  event ExcludeMultipleAccountsFromFees(address[] accounts, bool isExcluded);
-
-  event FixedSaleEarlyParticipantsAdded(address[] participants);
 
   event SetAutomatedMarketMakerPair(address indexed pair, bool indexed value);
 
   event GasForProcessingUpdated(uint256 indexed newValue, uint256 indexed oldValue);
-
-  event FixedSaleBuy(address indexed account, uint256 indexed amount, bool indexed earlyParticipant, uint256 numberOfBuyers);
 
   event SwapAndLiquify(
     uint256 tokensSwapped,
@@ -858,9 +835,7 @@ contract TIKI is ERC20, Ownable {
     liquidityFee = _liquidityFee;
     totalFees = _BNBRewardsFee.add(_liquidityFee);
 
-
     dividendTracker = new TIKIDividendTracker();
-
 
     IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
     address _uniswapV2Pair = IUniswapV2Factory(_uniswapV2Router.factory())
@@ -871,50 +846,22 @@ contract TIKI is ERC20, Ownable {
 
     _setAutomatedMarketMakerPair(_uniswapV2Pair, true);
 
-    address _bounceFixedSaleWallet = 0x4Fc4bFeDc5c82644514fACF716C7F888a0C73cCc;
-    bounceFixedSaleWallet = _bounceFixedSaleWallet;
-
     // Exclude from receiving dividends
     dividendTracker.excludeFromDividends(address(dividendTracker));
     dividendTracker.excludeFromDividends(address(this));
     dividendTracker.excludeFromDividends(owner());
     dividendTracker.excludeFromDividends(address(_uniswapV2Router));
-    dividendTracker.excludeFromDividends(_bounceFixedSaleWallet);
 
     // Exclude from paying fees or having max transaction amount
     excludeFromFees(address(this), true);
 
     // Enable owner and fixed-sale wallet to send tokens before presales are over
     canTransferBeforeTradingIsEnabled[owner()] = true;
-    canTransferBeforeTradingIsEnabled[_bounceFixedSaleWallet] = true;
 
     _mint(owner(), 1000000000 * (10 ** 18));
   }
 
   receive() external payable {
-  }
-
-  function updateDividendTracker(address newAddress) public onlyOwner {
-    require(newAddress != address(dividendTracker), "TIKI: The dividend tracker already has that address");
-
-    TIKIDividendTracker newDividendTracker = TIKIDividendTracker(payable(newAddress));
-
-    require(newDividendTracker.owner() == address(this), "TIKI: The new dividend tracker must be owned by the TIKI token contract");
-
-    newDividendTracker.excludeFromDividends(address(newDividendTracker));
-    newDividendTracker.excludeFromDividends(address(this));
-    newDividendTracker.excludeFromDividends(owner());
-    newDividendTracker.excludeFromDividends(address(uniswapV2Router));
-
-    emit UpdateDividendTracker(newAddress, address(dividendTracker));
-
-    dividendTracker = newDividendTracker;
-  }
-
-  function updateUniswapV2Router(address newAddress) public onlyOwner {
-    require(newAddress != address(uniswapV2Router), "TIKI: The router already has that address");
-    emit UpdateUniswapV2Router(newAddress, address(uniswapV2Router));
-    uniswapV2Router = IUniswapV2Router02(newAddress);
   }
 
   function excludeFromFees(address account, bool excluded) public onlyOwner {
@@ -924,129 +871,18 @@ contract TIKI is ERC20, Ownable {
     emit ExcludeFromFees(account, excluded);
   }
 
-  function excludeMultipleAccountsFromFees(address[] calldata accounts, bool excluded) public onlyOwner {
-    for (uint256 i = 0; i < accounts.length; i++) {
-      _isExcludedFromFees[accounts[i]] = excluded;
-    }
-
-    emit ExcludeMultipleAccountsFromFees(accounts, excluded);
-  }
-
-  function addFixedSaleEarlyParticipants(address[] calldata accounts) external onlyOwner {
-    for (uint256 i = 0; i < accounts.length; i++) {
-      fixedSaleEarlyParticipants[accounts[i]] = true;
-    }
-
-    emit FixedSaleEarlyParticipantsAdded(accounts);
-  }
-
-  function setAutomatedMarketMakerPair(address pair, bool value) public onlyOwner {
-    require(pair != uniswapV2Pair, "TIKI: The PancakeSwap pair cannot be removed from automatedMarketMakerPairs");
-
-    _setAutomatedMarketMakerPair(pair, value);
-  }
-
-  function _setAutomatedMarketMakerPair(address pair, bool value) private {
-    require(automatedMarketMakerPairs[pair] != value, "TIKI: Automated market maker pair is already set to that value");
-    automatedMarketMakerPairs[pair] = value;
-
-    if (value) {
-      dividendTracker.excludeFromDividends(pair);
-    }
-
-    emit SetAutomatedMarketMakerPair(pair, value);
-  }
-
-  function updateGasForProcessing(uint256 newValue) public onlyOwner {
-    require(newValue >= 200000 && newValue <= 500000, "TIKI: gasForProcessing must be between 200,000 and 500,000");
-    require(newValue != gasForProcessing, "TIKI: Cannot update gasForProcessing to same value");
-    emit GasForProcessingUpdated(newValue, gasForProcessing);
-    gasForProcessing = newValue;
-  }
-
-  function updateClaimWait(uint256 claimWait) external onlyOwner {
-    dividendTracker.updateClaimWait(claimWait);
-  }
-
-  function getClaimWait() external view returns (uint256) {
-    return dividendTracker.claimWait();
-  }
-
-  function getTotalDividendsDistributed() external view returns (uint256) {
-    return dividendTracker.totalDividendsDistributed();
-  }
-
   function isExcludedFromFees(address account) public view returns (bool) {
     return _isExcludedFromFees[account];
-  }
-
-  function withdrawableDividendOf(address account) public view returns (uint256) {
-    return dividendTracker.withdrawableDividendOf(account);
-  }
-
-  function dividendTokenBalanceOf(address account) public view returns (uint256) {
-    return dividendTracker.balanceOf(account);
-  }
-
-  function getAccountDividendsInfo(address account)
-  external view returns (
-    address,
-    int256,
-    int256,
-    uint256,
-    uint256,
-    uint256,
-    uint256,
-    uint256) {
-    return dividendTracker.getAccount(account);
-  }
-
-  function getAccountDividendsInfoAtIndex(uint256 index)
-  external view returns (
-    address,
-    int256,
-    int256,
-    uint256,
-    uint256,
-    uint256,
-    uint256,
-    uint256) {
-    return dividendTracker.getAccountAtIndex(index);
-  }
-
-  function processDividendTracker(uint256 gas) external {
-    (uint256 iterations, uint256 claims, uint256 lastProcessedIndex) = dividendTracker.process(gas);
-    emit ProcessedDividendTracker(iterations, claims, lastProcessedIndex, false, gas, tx.origin);
-  }
-
-  function claim() external {
-    dividendTracker.processAccount(payable(_msgSender()), false);
-  }
-
-  function getLastProcessedIndex() external view returns (uint256) {
-    return dividendTracker.getLastProcessedIndex();
-  }
-
-  function getNumberOfDividendTokenHolders() external view returns (uint256) {
-    return dividendTracker.getNumberOfTokenHolders();
   }
 
   function getTradingIsEnabled() public view returns (bool) {
     return block.timestamp >= tradingEnabledTimestamp;
   }
 
-  function _transfer(
-    address from,
-    address to,
-    uint256 amount
-  ) internal override {
+  function _transfer(address from, address to, uint256 amount) internal override {
     require(from != address(0), "ERC20: Transfer from the zero address");
-    require(to != address(0), "ERC20: Transfer to the zero address");
 
     bool tradingIsEnabled = getTradingIsEnabled();
-
-    // only whitelisted addresses can make transfers after the fixed-sale has started
-    // and before the public presale is over
     if (!tradingIsEnabled) {
       require(canTransferBeforeTradingIsEnabled[from], "TIKI: This account cannot send tokens until trading is enabled");
     }
@@ -1054,28 +890,6 @@ contract TIKI is ERC20, Ownable {
     if (amount == 0) {
       super._transfer(from, to, 0);
       return;
-    }
-
-    bool isFixedSaleBuy = from == bounceFixedSaleWallet && to != owner();
-
-    // the fixed-sale can only send tokens to the owner or early participants of the fixed sale in the first 10 minutes,
-    // or 600 transactions, whichever is first.
-    if (isFixedSaleBuy) {
-      require(block.timestamp >= fixedSaleStartTimestamp, "TIKI: The fixed-sale has not started yet.");
-
-      bool openToEveryone = block.timestamp.sub(fixedSaleStartTimestamp) >= fixedSaleEarlyParticipantDuration ||
-      numberOfFixedSaleBuys >= fixedSaleEarlyParticipantBuysThreshold;
-
-      if (!openToEveryone) {
-        require(fixedSaleEarlyParticipants[to], "TIKI: The fixed-sale is only available to certain participants at the start");
-      }
-
-      if (!fixedSaleBuyers[to]) {
-        fixedSaleBuyers[to] = true;
-        numberOfFixedSaleBuys = numberOfFixedSaleBuys.add(1);
-      }
-
-      emit FixedSaleBuy(to, amount, fixedSaleEarlyParticipants[to], numberOfFixedSaleBuys);
     }
 
     if (
@@ -1111,8 +925,7 @@ contract TIKI is ERC20, Ownable {
       swapping = false;
     }
 
-
-    bool takeFee = !isFixedSaleBuy && tradingIsEnabled && !swapping;
+    bool takeFee = tradingIsEnabled && !swapping;
 
     // if any account belongs to _isExcludedFromFee account then remove the fee
     if (_isExcludedFromFees[from] || _isExcludedFromFees[to]) {
@@ -1147,6 +960,128 @@ contract TIKI is ERC20, Ownable {
 
       }
     }
+  }
+
+  // -----------------------------Dividend Related------------------------------------- //
+
+  function updateDividendTracker(address newAddress) public onlyOwner {
+    require(newAddress != address(dividendTracker), "TIKI: The dividend tracker already has that address");
+
+    TIKIDividendTracker newDividendTracker = TIKIDividendTracker(payable(newAddress));
+
+    require(newDividendTracker.owner() == address(this), "TIKI: The new dividend tracker must be owned by the TIKI token contract");
+
+    newDividendTracker.excludeFromDividends(address(newDividendTracker));
+    newDividendTracker.excludeFromDividends(address(this));
+    newDividendTracker.excludeFromDividends(owner());
+    newDividendTracker.excludeFromDividends(address(uniswapV2Router));
+
+    emit UpdateDividendTracker(newAddress, address(dividendTracker));
+
+    dividendTracker = newDividendTracker;
+  }
+
+  function updateGasForProcessing(uint256 newValue) public onlyOwner {
+    require(newValue >= 200000 && newValue <= 500000, "TIKI: gasForProcessing must be between 200,000 and 500,000");
+    require(newValue != gasForProcessing, "TIKI: Cannot update gasForProcessing to same value");
+    emit GasForProcessingUpdated(newValue, gasForProcessing);
+    gasForProcessing = newValue;
+  }
+
+  function updateClaimWait(uint256 claimWait) external onlyOwner {
+    dividendTracker.updateClaimWait(claimWait);
+  }
+
+  function getClaimWait() external view returns (uint256) {
+    return dividendTracker.claimWait();
+  }
+
+  function getTotalDividendsDistributed() external view returns (uint256) {
+    return dividendTracker.totalDividendsDistributed();
+  }
+
+  function withdrawableDividendOf(address account) public view returns (uint256) {
+    return dividendTracker.withdrawableDividendOf(account);
+  }
+
+  function dividendTokenBalanceOf(address account) public view returns (uint256) {
+    return dividendTracker.balanceOf(account);
+  }
+
+  function getAccountDividendsInfo(address account) external view returns (
+    address,
+    int256,
+    int256,
+    uint256,
+    uint256,
+    uint256,
+    uint256,
+    uint256) {
+    return dividendTracker.getAccount(account);
+  }
+
+  function getAccountDividendsInfoAtIndex(uint256 index) external view returns (
+    address,
+    int256,
+    int256,
+    uint256,
+    uint256,
+    uint256,
+    uint256,
+    uint256) {
+    return dividendTracker.getAccountAtIndex(index);
+  }
+
+  function processDividendTracker(uint256 gas) external {
+    (uint256 iterations, uint256 claims, uint256 lastProcessedIndex) = dividendTracker.process(gas);
+    emit ProcessedDividendTracker(iterations, claims, lastProcessedIndex, false, gas, tx.origin);
+  }
+
+  function claim() external {
+    dividendTracker.processAccount(payable(_msgSender()), false);
+  }
+
+  function getLastProcessedIndex() external view returns (uint256) {
+    return dividendTracker.getLastProcessedIndex();
+  }
+
+  function getNumberOfDividendTokenHolders() external view returns (uint256) {
+    return dividendTracker.getNumberOfTokenHolders();
+  }
+
+  function swapAndSendDividends(uint256 tokens) private {
+    swapTokensForEth(tokens);
+    uint256 dividends = address(this).balance;
+    (bool success,) = address(dividendTracker).call{value : dividends}("");
+
+    if (success) {
+      emit SendDividends(tokens, dividends);
+    }
+  }
+
+  // -------------------------- AMM Related ------------------------------- // 
+
+  function updateUniswapV2Router(address newAddress) public onlyOwner {
+    require(newAddress != address(uniswapV2Router), "TIKI: The router already has that address");
+    emit UpdateUniswapV2Router(newAddress, address(uniswapV2Router));
+    uniswapV2Router = IUniswapV2Router02(newAddress);
+  }
+
+  function setAutomatedMarketMakerPair(address pair, bool value) public onlyOwner {
+    require(pair != uniswapV2Pair, "TIKI: The PancakeSwap pair cannot be removed from automatedMarketMakerPairs");
+
+    _setAutomatedMarketMakerPair(pair, value);
+  }
+
+  function _setAutomatedMarketMakerPair(address pair, bool value) private {
+    require(automatedMarketMakerPairs[pair] != value, "TIKI: Automated market maker pair is already set to that value");
+    automatedMarketMakerPairs[pair] = value;
+
+    if (value) {
+      dividendTracker.excludeFromDividends(pair);
+    }
+
+    emit SetAutomatedMarketMakerPair(pair, value);
   }
 
   function swapAndLiquify(uint256 tokens) private {
@@ -1192,16 +1127,6 @@ contract TIKI is ERC20, Ownable {
       block.timestamp
     );
 
-  }
-
-  function swapAndSendDividends(uint256 tokens) private {
-    swapTokensForEth(tokens);
-    uint256 dividends = address(this).balance;
-    (bool success,) = address(dividendTracker).call{value : dividends}("");
-
-    if (success) {
-      emit SendDividends(tokens, dividends);
-    }
   }
 }
 
