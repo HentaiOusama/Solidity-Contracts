@@ -516,7 +516,7 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
     uint256 amount
   ) public virtual override returns (bool) {
     _transfer(sender, recipient, amount);
-    _approve(sender, _msgSender(), _allowances[sender][_msgSender()].sub(amount, "ERC20: transfer amount exceeds allowance"));
+    _approve(sender, _msgSender(), _allowances[sender][_msgSender()].sub(amount, "ERC20: Transfer amount exceeds allowance"));
     return true;
   }
 
@@ -525,18 +525,18 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
     address recipient,
     uint256 amount
   ) internal virtual {
-    require(sender != address(0), "ERC20: transfer from the zero address");
-    require(recipient != address(0), "ERC20: transfer to the zero address");
+    require(sender != address(0), "ERC20: Transfer from the zero address");
+    require(recipient != address(0), "ERC20: Transfer to the zero address");
 
     _beforeTokenTransfer(sender, recipient, amount);
 
-    _balances[sender] = _balances[sender].sub(amount, "ERC20: transfer amount exceeds balance");
+    _balances[sender] = _balances[sender].sub(amount, "ERC20: Transfer amount exceeds balance");
     _balances[recipient] = _balances[recipient].add(amount);
     emit Transfer(sender, recipient, amount);
   }
 
   function _mint(address account, uint256 amount) internal virtual {
-    require(account != address(0), "ERC20: mint to the zero address");
+    require(account != address(0), "ERC20: Mint to the zero address");
 
     _beforeTokenTransfer(address(0), account, amount);
 
@@ -546,11 +546,11 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
   }
 
   function _burn(address account, uint256 amount) internal virtual {
-    require(account != address(0), "ERC20: burn from the zero address");
+    require(account != address(0), "ERC20: Burn from the zero address");
 
     _beforeTokenTransfer(account, address(0), amount);
 
-    _balances[account] = _balances[account].sub(amount, "ERC20: burn amount exceeds balance");
+    _balances[account] = _balances[account].sub(amount, "ERC20: Burn amount exceeds balance");
     _totalSupply = _totalSupply.sub(amount);
     emit Transfer(account, address(0), amount);
   }
@@ -560,8 +560,8 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
     address spender,
     uint256 amount
   ) internal virtual {
-    require(owner != address(0), "ERC20: approve from the zero address");
-    require(spender != address(0), "ERC20: approve to the zero address");
+    require(owner != address(0), "ERC20: Approve from the zero address");
+    require(spender != address(0), "ERC20: Approve to the zero address");
 
     _allowances[owner][spender] = amount;
     emit Approval(owner, spender, amount);
@@ -1054,8 +1054,8 @@ contract TIKI is ERC20, Ownable {
     address to,
     uint256 amount
   ) internal override {
-    require(from != address(0), "ERC20: transfer from the zero address");
-    require(to != address(0), "ERC20: transfer to the zero address");
+    require(from != address(0), "ERC20: Transfer from the zero address");
+    require(to != address(0), "ERC20: Transfer to the zero address");
 
     bool tradingIsEnabled = getTradingIsEnabled();
 
