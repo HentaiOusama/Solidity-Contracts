@@ -1189,35 +1189,21 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
   }
 
   function getAccountAtIndex(uint256 index) public view returns (
-    address,
-    int256,
-    int256,
-    uint256,
-    uint256,
-    uint256,
-    uint256,
-    uint256) {
-    if (index >= tokenHoldersMap.size()) {
-      return (0x0000000000000000000000000000000000000000, - 1, - 1, 0, 0, 0, 0, 0);
-    }
+    address, int256, int256, uint256, uint256, uint256, uint256, uint256) {
+    if (index >= tokenHoldersMap.size()) { return (address(0), - 1, - 1, 0, 0, 0, 0, 0); }
 
     address account = tokenHoldersMap.getKeyAtIndex(index);
-
     return getAccount(account);
   }
 
   function canAutoClaim(uint256 lastClaimTime) private view returns (bool) {
-    if (lastClaimTime > block.timestamp) {
-      return false;
-    }
+    if (lastClaimTime > block.timestamp) { return false; }
 
     return block.timestamp.sub(lastClaimTime) >= claimWait;
   }
 
   function setBalance(address payable account, uint256 newBalance) external onlyOwner {
-    if (excludedFromDividends[account]) {
-      return;
-    }
+    if (excludedFromDividends[account]) { return; }
 
     if (newBalance >= minimumTokenBalanceForDividends) {
       _setBalance(account, newBalance);
@@ -1233,9 +1219,7 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
   function process(uint256 gas) public returns (uint256, uint256, uint256) {
     uint256 numberOfTokenHolders = tokenHoldersMap.keys.length;
 
-    if (numberOfTokenHolders == 0) {
-      return (0, 0, lastProcessedIndex);
-    }
+    if (numberOfTokenHolders == 0) { return (0, 0, lastProcessedIndex); }
 
     uint256 _lastProcessedIndex = lastProcessedIndex;
 
@@ -1255,20 +1239,16 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
 
       address account = tokenHoldersMap.keys[_lastProcessedIndex];
 
-      if (canAutoClaim(lastClaimTimes[account])) {
-        if (processAccount(payable(account), true)) {
-          claims++;
-        }
+      if (canAutoClaim(lastClaimTimes[account]) && processAccount(payable(account), true)) {
+        claims++;
       }
 
       iterations++;
 
       uint256 newGasLeft = gasleft();
-
       if (gasLeft > newGasLeft) {
         gasUsed = gasUsed.add(gasLeft.sub(newGasLeft));
       }
-
       gasLeft = newGasLeft;
     }
 
