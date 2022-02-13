@@ -827,29 +827,23 @@ contract TIKI is ERC20, Ownable {
   );
 
   constructor(string memory _tokenName, string memory _tokenSymbol, uint8 _decimals) ERC20(_tokenName, _tokenSymbol, _decimals) {
-    uint256 _BNBRewardsFee = 10;
-    uint256 _liquidityFee = 5;
-
-    BNBRewardsFee = _BNBRewardsFee;
-    liquidityFee = _liquidityFee;
-    totalFees = _BNBRewardsFee.add(_liquidityFee);
+    BNBRewardsFee = 10;
+    liquidityFee = 5;
+    totalFees = BNBRewardsFee.add(liquidityFee);
 
     dividendTracker = new TIKIDividendTracker(decimals());
 
-    IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
-    address _uniswapV2Pair = IUniswapV2Factory(_uniswapV2Router.factory())
-    .createPair(address(this), _uniswapV2Router.WETH());
+    uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+    uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).createPair(address(this), uniswapV2Router.WETH());
 
-    uniswapV2Router = _uniswapV2Router;
-    uniswapV2Pair = _uniswapV2Pair;
-
-    _setAutomatedMarketMakerPair(_uniswapV2Pair, true);
+    _setAutomatedMarketMakerPair(uniswapV2Pair, true);
 
     // Exclude from receiving dividends
     dividendTracker.excludeFromDividends(address(dividendTracker));
     dividendTracker.excludeFromDividends(address(this));
+    dividendTracker.excludeFromDividends(address(0));
     dividendTracker.excludeFromDividends(owner());
-    dividendTracker.excludeFromDividends(address(_uniswapV2Router));
+    dividendTracker.excludeFromDividends(address(uniswapV2Router));
 
     // Exclude from paying fees or having max transaction amount
     excludeFromFees(address(this), true);
@@ -895,14 +889,11 @@ contract TIKI is ERC20, Ownable {
     uint256 contractTokenBalance = balanceOf(address(this));
 
     bool canSwap = contractTokenBalance >= swapTokensAtAmount;
-
     if (
       tradingIsEnabled &&
-      canSwap &&
-      !swapping &&
-      !automatedMarketMakerPairs[from] &&
-      from != owner() &&
-      to != owner()
+      canSwap && !swapping &&
+    !automatedMarketMakerPairs[from] &&
+    from != owner() && to != owner()
     ) {
       swapping = true;
 
@@ -916,8 +907,6 @@ contract TIKI is ERC20, Ownable {
     }
 
     bool takeFee = tradingIsEnabled && !swapping;
-
-    // if any account belongs to _isExcludedFromFee account then remove the fee
     if (_isExcludedFromFees[from] || _isExcludedFromFees[to]) {
       takeFee = false;
     }
@@ -931,7 +920,6 @@ contract TIKI is ERC20, Ownable {
       }
 
       amount = amount.sub(fees);
-
       super._transfer(from, address(this), fees);
     }
 
@@ -945,10 +933,7 @@ contract TIKI is ERC20, Ownable {
 
       try dividendTracker.process(gas) returns (uint256 iterations, uint256 claims, uint256 lastProcessedIndex) {
         emit ProcessedDividendTracker(iterations, claims, lastProcessedIndex, true, gas, tx.origin);
-      }
-      catch {
-
-      }
+      } catch {}
     }
   }
 
