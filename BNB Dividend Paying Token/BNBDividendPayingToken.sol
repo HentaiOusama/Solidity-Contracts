@@ -762,7 +762,7 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
   }
 }
 
-contract TIKI is ERC20, Ownable {
+contract BNBDividendToken is ERC20, Ownable {
   using SafeMath for uint256;
 
   IUniswapV2Router02 public uniswapV2Router;
@@ -770,7 +770,7 @@ contract TIKI is ERC20, Ownable {
 
   bool private swapping;
 
-  TIKIDividendTracker public dividendTracker;
+  DividendTracker public dividendTracker;
 
   uint256 public swapTokensAtAmount;
 
@@ -783,7 +783,7 @@ contract TIKI is ERC20, Ownable {
   uint256 public gasForProcessing = 300000;
 
   // timestamp for when the token can be traded freely on PancakeSwap
-  uint256 public immutable tradingEnabledTimestamp = 1623967200; //June 17, 22:00 UTC, 2021
+  uint256 public immutable tradingEnabledTimestamp = 1623967200; // June 17, 22:00 UTC, 2021
 
   mapping(address => bool) private _isExcludedFromFees;
   mapping(address => bool) private canTransferBeforeTradingIsEnabled;
@@ -827,7 +827,7 @@ contract TIKI is ERC20, Ownable {
     liquidityFee = 5;
     totalFees = BNBRewardsFee.add(liquidityFee);
 
-    dividendTracker = new TIKIDividendTracker(decimals(), 10000);
+    dividendTracker = new DividendTracker(appendString(_tokenSymbol, "-DT"), decimals(), 10000);
 
     uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
     uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).createPair(address(this), uniswapV2Router.WETH());
@@ -849,8 +849,12 @@ contract TIKI is ERC20, Ownable {
   receive() external payable {
   }
 
+  function appendString(string memory a, string memory b) internal pure returns (string memory) {
+    return string(abi.encodePacked(a, b));
+  }
+
   function excludeFromFees(address account, bool excluded) public onlyOwner {
-    require(_isExcludedFromFees[account] != excluded, "TIKI: Account is already the value of 'excluded'");
+    require(_isExcludedFromFees[account] != excluded, "Account is already excluded");
     _isExcludedFromFees[account] = excluded;
 
     emit ExcludeFromFees(account, excluded);
@@ -865,11 +869,11 @@ contract TIKI is ERC20, Ownable {
   }
 
   function _transfer(address from, address to, uint256 amount) internal override {
-    require(from != address(0), "ERC20: Transfer from the zero address");
+    require(from != address(0), "Transfer from the zero address");
 
     bool tradingIsEnabled = getTradingIsEnabled();
     if (!tradingIsEnabled) {
-      require(canTransferBeforeTradingIsEnabled[from], "TIKI: This account cannot send tokens until trading is enabled");
+      require(canTransferBeforeTradingIsEnabled[from], "This account cannot send tokens until trading is enabled");
     }
 
     if (amount == 0) {
@@ -928,11 +932,11 @@ contract TIKI is ERC20, Ownable {
   // -----------------------------Dividend Related------------------------------------- //
 
   function updateDividendTracker(address newAddress) public onlyOwner {
-    require(newAddress != address(dividendTracker), "TIKI: The dividend tracker already has that address");
+    require(newAddress != address(dividendTracker), "The dividend tracker already has that address");
 
-    TIKIDividendTracker newDividendTracker = TIKIDividendTracker(payable(newAddress));
+    DividendTracker newDividendTracker = DividendTracker(payable(newAddress));
 
-    require(newDividendTracker.owner() == address(this), "TIKI: The new dividend tracker must be owned by the TIKI token contract");
+    require(newDividendTracker.owner() == address(this), "The new dividend tracker has wrong owner");
 
     newDividendTracker.excludeFromDividends(address(newDividendTracker));
     newDividendTracker.excludeFromDividends(address(this));
@@ -946,8 +950,8 @@ contract TIKI is ERC20, Ownable {
   }
 
   function updateGasForProcessing(uint256 newValue) public onlyOwner {
-    require(newValue >= 200000 && newValue <= 500000, "TIKI: gasForProcessing must be between 200,000 and 500,000");
-    require(newValue != gasForProcessing, "TIKI: Cannot update gasForProcessing to same value");
+    require(newValue >= 200000 && newValue <= 500000, "gasForProcessing must be between 200,000 and 500,000");
+    require(newValue != gasForProcessing, "Cannot update gasForProcessing to same value");
     emit GasForProcessingUpdated(newValue, gasForProcessing);
     gasForProcessing = newValue;
   }
@@ -1012,19 +1016,19 @@ contract TIKI is ERC20, Ownable {
   // -------------------------- AMM Related ------------------------------- // 
 
   function updateUniswapV2Router(address newAddress) public onlyOwner {
-    require(newAddress != address(uniswapV2Router), "TIKI: The router already has that address");
+    require(newAddress != address(uniswapV2Router), "The router already has that address");
     emit UpdateUniswapV2Router(newAddress, address(uniswapV2Router));
     uniswapV2Router = IUniswapV2Router02(newAddress);
   }
 
   function setAutomatedMarketMakerPair(address pair, bool value) public onlyOwner {
-    require(pair != uniswapV2Pair, "TIKI: The PancakeSwap pair cannot be removed from automatedMarketMakerPairs");
+    require(pair != uniswapV2Pair, "The PancakeSwap pair cannot be removed from automatedMarketMakerPairs");
 
     _setAutomatedMarketMakerPair(pair, value);
   }
 
   function _setAutomatedMarketMakerPair(address pair, bool value) private {
-    require(automatedMarketMakerPairs[pair] != value, "TIKI: Automated market maker pair is already set to that value");
+    require(automatedMarketMakerPairs[pair] != value, "Automated market maker pair is already set to that value");
     automatedMarketMakerPairs[pair] = value;
 
     if (value) {
@@ -1080,7 +1084,7 @@ contract TIKI is ERC20, Ownable {
   }
 }
 
-contract TIKIDividendTracker is DividendPayingToken, Ownable {
+contract DividendTracker is DividendPayingToken, Ownable {
   using SafeMath for uint256;
   using SafeMathInt for int256;
   using IterableMapping for IterableMapping.Map;
@@ -1100,18 +1104,19 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
 
   event Claim(address indexed account, uint256 amount, bool indexed automatic);
 
-  constructor(uint8 _decimals, uint256 _minimumTokenBalanceForDividends) DividendPayingToken("TIKI_Dividend_Tracker", "TIKI_Dividend_Tracker", _decimals) {
+  constructor(string memory _symbol, uint8 _decimals, uint256 _minimumTokenBalanceForDividends)
+  DividendPayingToken(_symbol, _symbol, _decimals) {
     claimWait = 3600;
     minimumTokenBalanceForDividends = _minimumTokenBalanceForDividends * (10 ** decimals());
     // Must hold mininum tokens to receive dividends
   }
 
   function _transfer(address, address, uint256) internal pure override {
-    require(false, "Dividend_Tracker: No transfers allowed");
+    require(false, "No transfers allowed");
   }
 
   function withdrawDividend() public pure override {
-    require(false, "Dividend_Tracker: withdrawDividend disabled. Use the 'claim' function on the main TIKI contract.");
+    require(false, "withdrawDividend disabled. Use the 'claim' function on the main contract.");
   }
 
   function excludeFromDividends(address account) external onlyOwner {
@@ -1125,8 +1130,8 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
   }
 
   function updateClaimWait(uint256 newClaimWait) external onlyOwner {
-    require(newClaimWait >= 3600 && newClaimWait <= 86400, "Dividend_Tracker: claimWait must be updated to between 1 and 24 hours");
-    require(newClaimWait != claimWait, "Dividend_Tracker: Cannot update claimWait to same value");
+    require(newClaimWait >= 3600 && newClaimWait <= 86400, "claimWait must be updated to between 1 and 24 hours");
+    require(newClaimWait != claimWait, "Cannot update claimWait to same value");
     emit ClaimWaitUpdated(newClaimWait, claimWait);
     claimWait = newClaimWait;
   }
