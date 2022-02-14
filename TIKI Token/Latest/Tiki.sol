@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity >=0.8.0 <0.9.0;
+pragma solidity >=0.8.8 <0.9.0;
 
 abstract contract Context {
   function _msgSender() internal view virtual returns (address) {
@@ -675,17 +675,13 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
   constructor(string memory _name, string memory _symbol, uint8 _decimals) ERC20(_name, _symbol, _decimals) {
   }
 
-  receive() external payable {
-    distributeDividends();
-  }
+  receive() external payable {distributeDividends();}
 
   function distributeDividends() public override payable {
     require(totalSupply() > 0);
 
     if (msg.value > 0) {
-      magnifiedDividendPerShare = magnifiedDividendPerShare.add(
-        (msg.value).mul(magnitude) / totalSupply()
-      );
+      magnifiedDividendPerShare = magnifiedDividendPerShare.add((msg.value).mul(magnitude) / totalSupply());
       emit DividendsDistributed(_msgSender(), msg.value);
 
       totalDividendsDistributed = totalDividendsDistributed.add(msg.value);
@@ -831,7 +827,7 @@ contract TIKI is ERC20, Ownable {
     liquidityFee = 5;
     totalFees = BNBRewardsFee.add(liquidityFee);
 
-    dividendTracker = new TIKIDividendTracker(decimals());
+    dividendTracker = new TIKIDividendTracker(decimals(), 10000);
 
     uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
     uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).createPair(address(this), uniswapV2Router.WETH());
@@ -886,8 +882,8 @@ contract TIKI is ERC20, Ownable {
     bool canSwap = contractTokenBalance >= swapTokensAtAmount;
     if (
       tradingIsEnabled && canSwap && !swapping &&
-      !automatedMarketMakerPairs[from] &&
-      from != owner() && to != owner()
+    !automatedMarketMakerPairs[from] &&
+    from != owner() && to != owner()
     ) {
       swapping = true;
 
@@ -940,6 +936,7 @@ contract TIKI is ERC20, Ownable {
 
     newDividendTracker.excludeFromDividends(address(newDividendTracker));
     newDividendTracker.excludeFromDividends(address(this));
+    dividendTracker.excludeFromDividends(address(0));
     newDividendTracker.excludeFromDividends(owner());
     newDividendTracker.excludeFromDividends(address(uniswapV2Router));
 
@@ -976,26 +973,12 @@ contract TIKI is ERC20, Ownable {
   }
 
   function getAccountDividendsInfo(address account) external view returns (
-    address,
-    int256,
-    int256,
-    uint256,
-    uint256,
-    uint256,
-    uint256,
-    uint256) {
+    address, int256, int256, uint256, uint256, uint256, uint256, uint256) {
     return dividendTracker.getAccount(account);
   }
 
   function getAccountDividendsInfoAtIndex(uint256 index) external view returns (
-    address,
-    int256,
-    int256,
-    uint256,
-    uint256,
-    uint256,
-    uint256,
-    uint256) {
+    address, int256, int256, uint256, uint256, uint256, uint256, uint256) {
     return dividendTracker.getAccountAtIndex(index);
   }
 
@@ -1117,18 +1100,18 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
 
   event Claim(address indexed account, uint256 amount, bool indexed automatic);
 
-  constructor(uint8 _decimals) DividendPayingToken("TIKI_Dividend_Tracker", "TIKI_Dividend_Tracker", _decimals) {
+  constructor(uint8 _decimals, uint256 _minimumTokenBalanceForDividends) DividendPayingToken("TIKI_Dividend_Tracker", "TIKI_Dividend_Tracker", _decimals) {
     claimWait = 3600;
-    minimumTokenBalanceForDividends = 10000 * (10 ** decimals());
-    // Must hold 10000+ tokens
+    minimumTokenBalanceForDividends = _minimumTokenBalanceForDividends * (10 ** decimals());
+    // Must hold mininum tokens to receive dividends
   }
 
   function _transfer(address, address, uint256) internal pure override {
-    require(false, "TIKI_Dividend_Tracker: No transfers allowed");
+    require(false, "Dividend_Tracker: No transfers allowed");
   }
 
   function withdrawDividend() public pure override {
-    require(false, "TIKI_Dividend_Tracker: withdrawDividend disabled. Use the 'claim' function on the main TIKI contract.");
+    require(false, "Dividend_Tracker: withdrawDividend disabled. Use the 'claim' function on the main TIKI contract.");
   }
 
   function excludeFromDividends(address account) external onlyOwner {
@@ -1142,8 +1125,8 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
   }
 
   function updateClaimWait(uint256 newClaimWait) external onlyOwner {
-    require(newClaimWait >= 3600 && newClaimWait <= 86400, "TIKI_Dividend_Tracker: claimWait must be updated to between 1 and 24 hours");
-    require(newClaimWait != claimWait, "TIKI_Dividend_Tracker: Cannot update claimWait to same value");
+    require(newClaimWait >= 3600 && newClaimWait <= 86400, "Dividend_Tracker: claimWait must be updated to between 1 and 24 hours");
+    require(newClaimWait != claimWait, "Dividend_Tracker: Cannot update claimWait to same value");
     emit ClaimWaitUpdated(newClaimWait, claimWait);
     claimWait = newClaimWait;
   }
@@ -1157,18 +1140,11 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
   }
 
   function getAccount(address _account) public view returns (
-    address account,
-    int256 index,
-    int256 iterationsUntilProcessed,
-    uint256 withdrawableDividends,
-    uint256 totalDividends,
-    uint256 lastClaimTime,
-    uint256 nextClaimTime,
-    uint256 secondsUntilAutoClaimAvailable) {
+    address account, int256 index, int256 iterationsUntilProcessed, uint256 withdrawableDividends,
+    uint256 totalDividends, uint256 lastClaimTime, uint256 nextClaimTime, uint256 secondsUntilAutoClaimAvailable) {
+
     account = _account;
-
     index = tokenHoldersMap.getIndexOfKey(account);
-
     iterationsUntilProcessed = - 1;
 
     if (index >= 0) {
@@ -1190,20 +1166,20 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
 
   function getAccountAtIndex(uint256 index) public view returns (
     address, int256, int256, uint256, uint256, uint256, uint256, uint256) {
-    if (index >= tokenHoldersMap.size()) { return (address(0), - 1, - 1, 0, 0, 0, 0, 0); }
+    if (index >= tokenHoldersMap.size()) {return (address(0), - 1, - 1, 0, 0, 0, 0, 0);}
 
     address account = tokenHoldersMap.getKeyAtIndex(index);
     return getAccount(account);
   }
 
   function canAutoClaim(uint256 lastClaimTime) private view returns (bool) {
-    if (lastClaimTime > block.timestamp) { return false; }
+    if (lastClaimTime > block.timestamp) {return false;}
 
     return block.timestamp.sub(lastClaimTime) >= claimWait;
   }
 
   function setBalance(address payable account, uint256 newBalance) external onlyOwner {
-    if (excludedFromDividends[account]) { return; }
+    if (excludedFromDividends[account]) {return;}
 
     if (newBalance >= minimumTokenBalanceForDividends) {
       _setBalance(account, newBalance);
@@ -1218,24 +1194,20 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
 
   function process(uint256 gas) public returns (uint256, uint256, uint256) {
     uint256 numberOfTokenHolders = tokenHoldersMap.keys.length;
+    if (numberOfTokenHolders == 0) {return (0, 0, lastProcessedIndex);}
 
-    if (numberOfTokenHolders == 0) { return (0, 0, lastProcessedIndex); }
-
-    uint256 _lastProcessedIndex = lastProcessedIndex;
-    uint256 gasUsed = 0;
-    uint256 gasLeft = gasleft();
+    uint256 currentProcessingIndex = lastProcessedIndex;
     uint256 iterations = 0;
     uint256 claims = 0;
+    uint256 gasUsed = 0;
+    uint256 gasLeft = gasleft();
 
     while (gasUsed < gas && iterations < numberOfTokenHolders) {
-      _lastProcessedIndex++;
-      if (_lastProcessedIndex >= tokenHoldersMap.keys.length) { _lastProcessedIndex = 0; }
-      address account = tokenHoldersMap.keys[_lastProcessedIndex];
+      currentProcessingIndex++;
+      if (currentProcessingIndex >= tokenHoldersMap.keys.length) {currentProcessingIndex = 0;}
+      address account = tokenHoldersMap.keys[currentProcessingIndex];
 
-      if (canAutoClaim(lastClaimTimes[account]) && processAccount(payable(account), true)) {
-        claims++;
-      }
-
+      if (canAutoClaim(lastClaimTimes[account]) && processAccount(payable(account), true)) {claims++;}
       iterations++;
 
       uint256 newGasLeft = gasleft();
@@ -1245,8 +1217,7 @@ contract TIKIDividendTracker is DividendPayingToken, Ownable {
       gasLeft = newGasLeft;
     }
 
-    lastProcessedIndex = _lastProcessedIndex;
-
+    lastProcessedIndex = currentProcessingIndex;
     return (iterations, claims, lastProcessedIndex);
   }
 
