@@ -574,7 +574,7 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
   ) internal virtual {}
 }
 
-library IterableMapping {
+contract IterableMapping {
   // Iterable mapping from address to uint;
   struct Map {
     address[] keys;
@@ -583,53 +583,57 @@ library IterableMapping {
     mapping(address => bool) inserted;
   }
 
-  function get(Map storage map, address key) public view returns (uint) {
-    return map.values[key];
+  Map internal iterableMap;
+
+  constructor() {}
+
+  function iterableMapGet(address key) public view returns (uint) {
+    return iterableMap.values[key];
   }
 
-  function getIndexOfKey(Map storage map, address key) public view returns (int) {
-    if (!map.inserted[key]) {
+  function iterableMapGetIndexOfKey(address key) public view returns (int) {
+    if (!iterableMap.inserted[key]) {
       return - 1;
     }
-    return int(map.indexOf[key]);
+    return int(iterableMap.indexOf[key]);
   }
 
-  function getKeyAtIndex(Map storage map, uint index) public view returns (address) {
-    return map.keys[index];
+  function iterableMapGetKeyAtIndex(uint index) public view returns (address) {
+    return iterableMap.keys[index];
   }
 
-  function size(Map storage map) public view returns (uint) {
-    return map.keys.length;
+  function iterableMapSize() public view returns (uint) {
+    return iterableMap.keys.length;
   }
 
-  function set(Map storage map, address key, uint val) public {
-    if (map.inserted[key]) {
-      map.values[key] = val;
+  function iterableMapSet(address key, uint val) public {
+    if (iterableMap.inserted[key]) {
+      iterableMap.values[key] = val;
     } else {
-      map.inserted[key] = true;
-      map.values[key] = val;
-      map.indexOf[key] = map.keys.length;
-      map.keys.push(key);
+      iterableMap.inserted[key] = true;
+      iterableMap.values[key] = val;
+      iterableMap.indexOf[key] = iterableMap.keys.length;
+      iterableMap.keys.push(key);
     }
   }
 
-  function remove(Map storage map, address key) public {
-    if (!map.inserted[key]) {
+  function iterableMapRemove(address key) public {
+    if (!iterableMap.inserted[key]) {
       return;
     }
 
-    delete map.inserted[key];
-    delete map.values[key];
+    delete iterableMap.inserted[key];
+    delete iterableMap.values[key];
 
-    uint index = map.indexOf[key];
-    uint lastIndex = map.keys.length - 1;
-    address lastKey = map.keys[lastIndex];
+    uint index = iterableMap.indexOf[key];
+    uint lastIndex = iterableMap.keys.length - 1;
+    address lastKey = iterableMap.keys[lastIndex];
 
-    map.indexOf[lastKey] = index;
-    delete map.indexOf[key];
+    iterableMap.indexOf[lastKey] = index;
+    delete iterableMap.indexOf[key];
 
-    map.keys[index] = lastKey;
-    map.keys.pop();
+    iterableMap.keys[index] = lastKey;
+    iterableMap.keys.pop();
   }
 }
 
@@ -1084,12 +1088,10 @@ contract BNBDividendToken is ERC20, Ownable {
   }
 }
 
-contract DividendTracker is DividendPayingToken, Ownable {
+contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
   using SafeMath for uint256;
   using SafeMathInt for int256;
-  using IterableMapping for IterableMapping.Map;
 
-  IterableMapping.Map private tokenHoldersMap;
   uint256 public lastProcessedIndex;
 
   mapping(address => bool) public excludedFromDividends;
@@ -1124,7 +1126,7 @@ contract DividendTracker is DividendPayingToken, Ownable {
     excludedFromDividends[account] = true;
 
     _setBalance(account, 0);
-    tokenHoldersMap.remove(account);
+    iterableMapRemove(account);
 
     emit ExcludeFromDividends(account);
   }
@@ -1141,7 +1143,7 @@ contract DividendTracker is DividendPayingToken, Ownable {
   }
 
   function getNumberOfTokenHolders() external view returns (uint256) {
-    return tokenHoldersMap.keys.length;
+    return iterableMap.keys.length;
   }
 
   function getAccount(address _account) public view returns (
@@ -1149,7 +1151,7 @@ contract DividendTracker is DividendPayingToken, Ownable {
     uint256 totalDividends, uint256 lastClaimTime, uint256 nextClaimTime, uint256 secondsUntilAutoClaimAvailable) {
 
     account = _account;
-    index = tokenHoldersMap.getIndexOfKey(account);
+    index = iterableMapGetIndexOfKey(account);
     iterationsUntilProcessed = - 1;
 
     if (index >= 0) {
@@ -1157,7 +1159,7 @@ contract DividendTracker is DividendPayingToken, Ownable {
         iterationsUntilProcessed = index.sub(int256(lastProcessedIndex));
       }
       else {
-        uint256 processesUntilEndOfArray = tokenHoldersMap.keys.length > lastProcessedIndex ? tokenHoldersMap.keys.length.sub(lastProcessedIndex) : 0;
+        uint256 processesUntilEndOfArray = iterableMap.keys.length > lastProcessedIndex ? iterableMap.keys.length.sub(lastProcessedIndex) : 0;
         iterationsUntilProcessed = index.add(int256(processesUntilEndOfArray));
       }
     }
@@ -1171,9 +1173,9 @@ contract DividendTracker is DividendPayingToken, Ownable {
 
   function getAccountAtIndex(uint256 index) public view returns (
     address, int256, int256, uint256, uint256, uint256, uint256, uint256) {
-    if (index >= tokenHoldersMap.size()) {return (address(0), - 1, - 1, 0, 0, 0, 0, 0);}
+    if (index >= iterableMapSize()) {return (address(0), - 1, - 1, 0, 0, 0, 0, 0);}
 
-    address account = tokenHoldersMap.getKeyAtIndex(index);
+    address account = iterableMapGetKeyAtIndex(index);
     return getAccount(account);
   }
 
@@ -1188,17 +1190,17 @@ contract DividendTracker is DividendPayingToken, Ownable {
 
     if (newBalance >= minimumTokenBalanceForDividends) {
       _setBalance(account, newBalance);
-      tokenHoldersMap.set(account, newBalance);
+      iterableMapSet(account, newBalance);
     } else {
       _setBalance(account, 0);
-      tokenHoldersMap.remove(account);
+      iterableMapRemove(account);
     }
 
     processAccount(account, true);
   }
 
   function process(uint256 gas) public returns (uint256, uint256, uint256) {
-    uint256 numberOfTokenHolders = tokenHoldersMap.keys.length;
+    uint256 numberOfTokenHolders = iterableMap.keys.length;
     if (numberOfTokenHolders == 0) {return (0, 0, lastProcessedIndex);}
 
     uint256 currentProcessingIndex = lastProcessedIndex;
@@ -1209,8 +1211,8 @@ contract DividendTracker is DividendPayingToken, Ownable {
 
     while (gasUsed < gas && iterations < numberOfTokenHolders) {
       currentProcessingIndex++;
-      if (currentProcessingIndex >= tokenHoldersMap.keys.length) {currentProcessingIndex = 0;}
-      address account = tokenHoldersMap.keys[currentProcessingIndex];
+      if (currentProcessingIndex >= iterableMap.keys.length) {currentProcessingIndex = 0;}
+      address account = iterableMap.keys[currentProcessingIndex];
 
       if (canAutoClaim(lastClaimTimes[account]) && processAccount(payable(account), true)) {claims++;}
       iterations++;
