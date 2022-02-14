@@ -766,6 +766,159 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
   }
 }
 
+contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
+  using SafeMath for uint256;
+  using SafeMathInt for int256;
+
+  uint256 public lastProcessedIndex;
+
+  mapping(address => bool) public excludedFromDividends;
+
+  mapping(address => uint256) public lastClaimTimes;
+
+  uint256 public claimWait;
+  uint256 public immutable minimumTokenBalanceForDividends;
+
+  event ExcludeFromDividends(address indexed account);
+  event ClaimWaitUpdated(uint256 indexed newValue, uint256 indexed oldValue);
+
+  event Claim(address indexed account, uint256 amount, bool indexed automatic);
+
+  constructor(string memory _symbol, uint8 _decimals, uint256 _minimumTokenBalanceForDividends)
+  DividendPayingToken(_symbol, _symbol, _decimals) {
+    claimWait = 3600;
+    minimumTokenBalanceForDividends = _minimumTokenBalanceForDividends * (10 ** decimals());
+    // Must hold mininum tokens to receive dividends
+  }
+
+  function _transfer(address, address, uint256) internal pure override {
+    require(false, "No transfers allowed");
+  }
+
+  function withdrawDividend() public pure override {
+    require(false, "withdrawDividend disabled. Use the 'claim' function on the main contract.");
+  }
+
+  function excludeFromDividends(address account) external onlyOwner {
+    require(!excludedFromDividends[account]);
+    excludedFromDividends[account] = true;
+
+    _setBalance(account, 0);
+    iterableMapRemove(account);
+
+    emit ExcludeFromDividends(account);
+  }
+
+  function updateClaimWait(uint256 newClaimWait) external onlyOwner {
+    require(newClaimWait >= 3600 && newClaimWait <= 86400, "claimWait must be updated to between 1 and 24 hours");
+    require(newClaimWait != claimWait, "Cannot update claimWait to same value");
+    emit ClaimWaitUpdated(newClaimWait, claimWait);
+    claimWait = newClaimWait;
+  }
+
+  function getLastProcessedIndex() external view returns (uint256) {
+    return lastProcessedIndex;
+  }
+
+  function getNumberOfTokenHolders() external view returns (uint256) {
+    return iterableMap.keys.length;
+  }
+
+  function getAccount(address _account) public view returns (
+    address account, int256 index, int256 iterationsUntilProcessed, uint256 withdrawableDividends,
+    uint256 totalDividends, uint256 lastClaimTime, uint256 nextClaimTime, uint256 secondsUntilAutoClaimAvailable) {
+
+    account = _account;
+    index = iterableMapGetIndexOfKey(account);
+    iterationsUntilProcessed = - 1;
+
+    if (index >= 0) {
+      if (uint256(index) > lastProcessedIndex) {
+        iterationsUntilProcessed = index.sub(int256(lastProcessedIndex));
+      }
+      else {
+        uint256 processesUntilEndOfArray = iterableMap.keys.length > lastProcessedIndex ? iterableMap.keys.length.sub(lastProcessedIndex) : 0;
+        iterationsUntilProcessed = index.add(int256(processesUntilEndOfArray));
+      }
+    }
+
+    withdrawableDividends = withdrawableDividendOf(account);
+    totalDividends = accumulativeDividendOf(account);
+    lastClaimTime = lastClaimTimes[account];
+    nextClaimTime = lastClaimTime > 0 ? lastClaimTime.add(claimWait) : 0;
+    secondsUntilAutoClaimAvailable = nextClaimTime > block.timestamp ? nextClaimTime.sub(block.timestamp) : 0;
+  }
+
+  function getAccountAtIndex(uint256 index) public view returns (
+    address, int256, int256, uint256, uint256, uint256, uint256, uint256) {
+    if (index >= iterableMapSize()) {return (address(0), - 1, - 1, 0, 0, 0, 0, 0);}
+
+    address account = iterableMapGetKeyAtIndex(index);
+    return getAccount(account);
+  }
+
+  function canAutoClaim(uint256 lastClaimTime) private view returns (bool) {
+    if (lastClaimTime > block.timestamp) {return false;}
+
+    return block.timestamp.sub(lastClaimTime) >= claimWait;
+  }
+
+  function setBalance(address payable account, uint256 newBalance) external onlyOwner {
+    if (excludedFromDividends[account]) {return;}
+
+    if (newBalance >= minimumTokenBalanceForDividends) {
+      _setBalance(account, newBalance);
+      iterableMapSet(account, newBalance);
+    } else {
+      _setBalance(account, 0);
+      iterableMapRemove(account);
+    }
+
+    processAccount(account, true);
+  }
+
+  function process(uint256 gas) public returns (uint256, uint256, uint256) {
+    uint256 numberOfTokenHolders = iterableMap.keys.length;
+    if (numberOfTokenHolders == 0) {return (0, 0, lastProcessedIndex);}
+
+    uint256 currentProcessingIndex = lastProcessedIndex;
+    uint256 iterations = 0;
+    uint256 claims = 0;
+    uint256 gasUsed = 0;
+    uint256 gasLeft = gasleft();
+
+    while (gasUsed < gas && iterations < numberOfTokenHolders) {
+      currentProcessingIndex++;
+      if (currentProcessingIndex >= iterableMap.keys.length) {currentProcessingIndex = 0;}
+      address account = iterableMap.keys[currentProcessingIndex];
+
+      if (canAutoClaim(lastClaimTimes[account]) && processAccount(payable(account), true)) {claims++;}
+      iterations++;
+
+      uint256 newGasLeft = gasleft();
+      if (gasLeft > newGasLeft) {
+        gasUsed = gasUsed.add(gasLeft.sub(newGasLeft));
+      }
+      gasLeft = newGasLeft;
+    }
+
+    lastProcessedIndex = currentProcessingIndex;
+    return (iterations, claims, lastProcessedIndex);
+  }
+
+  function processAccount(address payable account, bool automatic) public onlyOwner returns (bool) {
+    uint256 amount = _withdrawDividendOfUser(account);
+
+    if (amount > 0) {
+      lastClaimTimes[account] = block.timestamp;
+      emit Claim(account, amount, automatic);
+      return true;
+    }
+
+    return false;
+  }
+}
+
 contract BNBDividendToken is ERC20, Ownable {
   using SafeMath for uint256;
 
@@ -1085,158 +1238,5 @@ contract BNBDividendToken is ERC20, Ownable {
       block.timestamp
     );
 
-  }
-}
-
-contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
-  using SafeMath for uint256;
-  using SafeMathInt for int256;
-
-  uint256 public lastProcessedIndex;
-
-  mapping(address => bool) public excludedFromDividends;
-
-  mapping(address => uint256) public lastClaimTimes;
-
-  uint256 public claimWait;
-  uint256 public immutable minimumTokenBalanceForDividends;
-
-  event ExcludeFromDividends(address indexed account);
-  event ClaimWaitUpdated(uint256 indexed newValue, uint256 indexed oldValue);
-
-  event Claim(address indexed account, uint256 amount, bool indexed automatic);
-
-  constructor(string memory _symbol, uint8 _decimals, uint256 _minimumTokenBalanceForDividends)
-  DividendPayingToken(_symbol, _symbol, _decimals) {
-    claimWait = 3600;
-    minimumTokenBalanceForDividends = _minimumTokenBalanceForDividends * (10 ** decimals());
-    // Must hold mininum tokens to receive dividends
-  }
-
-  function _transfer(address, address, uint256) internal pure override {
-    require(false, "No transfers allowed");
-  }
-
-  function withdrawDividend() public pure override {
-    require(false, "withdrawDividend disabled. Use the 'claim' function on the main contract.");
-  }
-
-  function excludeFromDividends(address account) external onlyOwner {
-    require(!excludedFromDividends[account]);
-    excludedFromDividends[account] = true;
-
-    _setBalance(account, 0);
-    iterableMapRemove(account);
-
-    emit ExcludeFromDividends(account);
-  }
-
-  function updateClaimWait(uint256 newClaimWait) external onlyOwner {
-    require(newClaimWait >= 3600 && newClaimWait <= 86400, "claimWait must be updated to between 1 and 24 hours");
-    require(newClaimWait != claimWait, "Cannot update claimWait to same value");
-    emit ClaimWaitUpdated(newClaimWait, claimWait);
-    claimWait = newClaimWait;
-  }
-
-  function getLastProcessedIndex() external view returns (uint256) {
-    return lastProcessedIndex;
-  }
-
-  function getNumberOfTokenHolders() external view returns (uint256) {
-    return iterableMap.keys.length;
-  }
-
-  function getAccount(address _account) public view returns (
-    address account, int256 index, int256 iterationsUntilProcessed, uint256 withdrawableDividends,
-    uint256 totalDividends, uint256 lastClaimTime, uint256 nextClaimTime, uint256 secondsUntilAutoClaimAvailable) {
-
-    account = _account;
-    index = iterableMapGetIndexOfKey(account);
-    iterationsUntilProcessed = - 1;
-
-    if (index >= 0) {
-      if (uint256(index) > lastProcessedIndex) {
-        iterationsUntilProcessed = index.sub(int256(lastProcessedIndex));
-      }
-      else {
-        uint256 processesUntilEndOfArray = iterableMap.keys.length > lastProcessedIndex ? iterableMap.keys.length.sub(lastProcessedIndex) : 0;
-        iterationsUntilProcessed = index.add(int256(processesUntilEndOfArray));
-      }
-    }
-
-    withdrawableDividends = withdrawableDividendOf(account);
-    totalDividends = accumulativeDividendOf(account);
-    lastClaimTime = lastClaimTimes[account];
-    nextClaimTime = lastClaimTime > 0 ? lastClaimTime.add(claimWait) : 0;
-    secondsUntilAutoClaimAvailable = nextClaimTime > block.timestamp ? nextClaimTime.sub(block.timestamp) : 0;
-  }
-
-  function getAccountAtIndex(uint256 index) public view returns (
-    address, int256, int256, uint256, uint256, uint256, uint256, uint256) {
-    if (index >= iterableMapSize()) {return (address(0), - 1, - 1, 0, 0, 0, 0, 0);}
-
-    address account = iterableMapGetKeyAtIndex(index);
-    return getAccount(account);
-  }
-
-  function canAutoClaim(uint256 lastClaimTime) private view returns (bool) {
-    if (lastClaimTime > block.timestamp) {return false;}
-
-    return block.timestamp.sub(lastClaimTime) >= claimWait;
-  }
-
-  function setBalance(address payable account, uint256 newBalance) external onlyOwner {
-    if (excludedFromDividends[account]) {return;}
-
-    if (newBalance >= minimumTokenBalanceForDividends) {
-      _setBalance(account, newBalance);
-      iterableMapSet(account, newBalance);
-    } else {
-      _setBalance(account, 0);
-      iterableMapRemove(account);
-    }
-
-    processAccount(account, true);
-  }
-
-  function process(uint256 gas) public returns (uint256, uint256, uint256) {
-    uint256 numberOfTokenHolders = iterableMap.keys.length;
-    if (numberOfTokenHolders == 0) {return (0, 0, lastProcessedIndex);}
-
-    uint256 currentProcessingIndex = lastProcessedIndex;
-    uint256 iterations = 0;
-    uint256 claims = 0;
-    uint256 gasUsed = 0;
-    uint256 gasLeft = gasleft();
-
-    while (gasUsed < gas && iterations < numberOfTokenHolders) {
-      currentProcessingIndex++;
-      if (currentProcessingIndex >= iterableMap.keys.length) {currentProcessingIndex = 0;}
-      address account = iterableMap.keys[currentProcessingIndex];
-
-      if (canAutoClaim(lastClaimTimes[account]) && processAccount(payable(account), true)) {claims++;}
-      iterations++;
-
-      uint256 newGasLeft = gasleft();
-      if (gasLeft > newGasLeft) {
-        gasUsed = gasUsed.add(gasLeft.sub(newGasLeft));
-      }
-      gasLeft = newGasLeft;
-    }
-
-    lastProcessedIndex = currentProcessingIndex;
-    return (iterations, claims, lastProcessedIndex);
-  }
-
-  function processAccount(address payable account, bool automatic) public onlyOwner returns (bool) {
-    uint256 amount = _withdrawDividendOfUser(account);
-
-    if (amount > 0) {
-      lastClaimTimes[account] = block.timestamp;
-      emit Claim(account, amount, automatic);
-      return true;
-    }
-
-    return false;
   }
 }
