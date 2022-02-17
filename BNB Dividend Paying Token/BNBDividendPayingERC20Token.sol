@@ -919,7 +919,7 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
     }
 }
 
-contract BNBDividendToken is ERC20, Ownable {
+contract BNBDividendPayingERC20Token is ERC20, Ownable {
     using SafeMath for uint256;
 
     IUniswapV2Router02 public uniswapV2Router;
@@ -990,46 +990,46 @@ contract BNBDividendToken is ERC20, Ownable {
     );
 
     constructor(string memory _tokenName, string memory _tokenSymbol, uint8 _decimals) ERC20(_tokenName, _tokenSymbol, _decimals) {
-        weeklyFee.push(FeeSet(12, 15, 3));
         // Week 0
-        weeklyFee.push(FeeSet(12, 14, 3));
+        weeklyFee.push(FeeSet(12, 15, 3));
         // Week 1
-        weeklyFee.push(FeeSet(12, 13, 3));
+        weeklyFee.push(FeeSet(12, 14, 3));
         // Week 2
-        weeklyFee.push(FeeSet(11, 13, 3));
+        weeklyFee.push(FeeSet(12, 13, 3));
         // Week 3
-        weeklyFee.push(FeeSet(10, 13, 3));
+        weeklyFee.push(FeeSet(11, 13, 3));
         // Week 4
-        weeklyFee.push(FeeSet(10, 12, 3));
+        weeklyFee.push(FeeSet(10, 13, 3));
         // Week 5
-        weeklyFee.push(FeeSet(10, 12, 2));
+        weeklyFee.push(FeeSet(10, 12, 3));
         // Week 6
-        weeklyFee.push(FeeSet(10, 11, 2));
+        weeklyFee.push(FeeSet(10, 12, 2));
         // Week 7
-        weeklyFee.push(FeeSet(9, 11, 2));
+        weeklyFee.push(FeeSet(10, 11, 2));
         // Week 8
-        weeklyFee.push(FeeSet(9, 10, 2));
+        weeklyFee.push(FeeSet(9, 11, 2));
         // Week 9
-        weeklyFee.push(FeeSet(8, 10, 2));
+        weeklyFee.push(FeeSet(9, 10, 2));
         // Week 10
-        weeklyFee.push(FeeSet(7, 10, 2));
+        weeklyFee.push(FeeSet(8, 10, 2));
         // Week 11
-        weeklyFee.push(FeeSet(7, 9, 2));
+        weeklyFee.push(FeeSet(7, 10, 2));
         // Week 12
-        weeklyFee.push(FeeSet(7, 9, 1));
+        weeklyFee.push(FeeSet(7, 9, 2));
         // Week 13
-        weeklyFee.push(FeeSet(7, 8, 1));
+        weeklyFee.push(FeeSet(7, 9, 1));
         // Week 14
-        weeklyFee.push(FeeSet(6, 7, 1));
+        weeklyFee.push(FeeSet(7, 8, 1));
         // Week 15
-        weeklyFee.push(FeeSet(5, 7, 1));
+        weeklyFee.push(FeeSet(6, 7, 1));
         // Week 16
-        weeklyFee.push(FeeSet(5, 6, 1));
+        weeklyFee.push(FeeSet(5, 7, 1));
         // Week 17
-        weeklyFee.push(FeeSet(4, 6, 1));
+        weeklyFee.push(FeeSet(5, 6, 1));
         // Week 18
-        weeklyFee.push(FeeSet(4, 5, 1));
+        weeklyFee.push(FeeSet(4, 6, 1));
         // Week 19
+        weeklyFee.push(FeeSet(4, 5, 1));
 
         dividendTracker = new DividendTracker(appendString(_tokenSymbol, "-DT"), decimals(), 10000);
 
