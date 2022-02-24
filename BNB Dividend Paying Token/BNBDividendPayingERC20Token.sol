@@ -1103,9 +1103,11 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         require(from != address(0), "Transfer from the zero address");
 
         if (isInitialEntrance && !swapping) {
-            uint256 gasLeft = gasleft();
             uint256 requiredGasValue = gasForProcessing + 400000;
-            require(gasLeft >= requiredGasValue, "Insufficient Gas. Try again with gasLimt of at least ".appendString((requiredGasValue + 100000).toString()));
+            require(
+                gasleft() >= requiredGasValue,
+                "Insufficient Gas. Try again with gasLimt of at least ".appendString((requiredGasValue + 100000).toString())
+            );
             isInitialEntrance = false;
         }
 
