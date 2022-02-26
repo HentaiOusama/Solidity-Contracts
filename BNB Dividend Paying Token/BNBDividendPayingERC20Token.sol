@@ -922,17 +922,6 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
     using SafeMath for uint256;
     using StringTools for *;
 
-    IUniswapV2Router02 public uniswapV2Router;
-    address public immutable uniswapV2Pair;
-
-    bool private swapping;
-    bool private isInitialEntrance = true;
-
-    DividendTracker public dividendTracker;
-
-    bool public isSwappingEnabled = true;
-    uint256 public swapTokensAtAmount;
-
     struct FeeSet {
         uint256 burnFee;
         uint256 holderFee;
@@ -941,44 +930,42 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
 
     FeeSet[] public weeklyFee;
     uint256 immutable oneWeek = 7 * 24 * 60 * 60;
+    mapping(address => bool) private _isExcludedFromFees;
+    mapping(address => uint256) public effectiveObtainTime;
 
     uint256 availableLiquidityFee;
     uint256 availableHolderFee;
 
-    mapping(address => uint256) public effectiveObtainTime;
+    IUniswapV2Router02 public uniswapV2Router;
+    address public immutable uniswapV2Pair;
+    mapping(address => bool) public automatedMarketMakerPairs;
 
+    bool public isSwappingEnabled = true;
+    uint256 public swapTokensAtAmount;
+    bool private swapping;
+    bool private isInitialEntrance = true;
+
+    DividendTracker public dividendTracker;
     uint256 public gasForProcessing = 300000;
 
     bool public isTradingEnabled = false;
     mapping(address => bool) private canTransferBeforeTradingIsEnabled;
 
-    mapping(address => bool) private _isExcludedFromFees;
-
-    mapping(address => bool) public automatedMarketMakerPairs;
-
     event UpdateDividendTracker(address indexed newAddress, address indexed oldAddress);
-
     event UpdateUniswapV2Router(address indexed newAddress, address indexed oldAddress);
-
     event ExcludeFromFees(address indexed account, bool isExcluded);
-
     event SetAutomatedMarketMakerPair(address indexed pair, bool indexed value);
-
     event GasForProcessingUpdated(uint256 indexed newValue, uint256 indexed oldValue);
-
     event FeeChargedAfterHoldingFor(address indexed account, uint256 numOfWeeks, uint256 fromTimestamp, uint256 toTimestamp);
-
     event SwapAndLiquify(
         uint256 tokensSwapped,
         uint256 ethReceived,
         uint256 tokensIntoLiqudity
     );
-
     event SendDividends(
         uint256 tokensSwapped,
         uint256 amount
     );
-
     event ProcessedDividendTracker(
         uint256 iterations,
         uint256 claims,
@@ -1084,6 +1071,15 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         swapTokensAtAmount = _swapTokensAtAmount;
     }
 
+    function getNumOfWeeksTokenHeldFor(address _address) public view returns(uint256) {
+        return ((block.timestamp).sub(effectiveObtainTime[_address])).div(oneWeek);
+    }
+    
+    function recoverLostCoins(address coinAddress, address receiveWallet, uint256 amount) external onlyOwner() {
+        require(coinAddress != address(this), "Cannot recover ABBY");
+        IERC20(coinAddress).transfer(receiveWallet, amount);
+    }
+
     function subTransfer(address from, address to, uint256 amount) internal {
         if (amount <= 0) {
             return;
@@ -1136,7 +1132,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
             swapping = false;
         }
 
-        bool takeFee = !(swapping || _isExcludedFromFees[from] || _isExcludedFromFees[to] || !isTradingEnabled);
+        bool takeFee = !(swapping || _isExcludedFromFees[from] || _isExcludedFromFees[to] || automatedMarketMakerPairs[from] || !isTradingEnabled);
 
         if (takeFee) {
             uint256 holdWeeks = ((block.timestamp).sub(effectiveObtainTime[from])).div(oneWeek);
