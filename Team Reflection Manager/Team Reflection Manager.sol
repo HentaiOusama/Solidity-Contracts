@@ -127,10 +127,8 @@ contract DividendHolderAndDistributor is Ownable {
   address private FB = 0x9E4188a7301843744fB74aE6Bcf56003DeAD629b;
   address private KS = 0xf7C1f4cA54D64542061E6f53A9D38E2f5A6A4Ecc;
 
-  address[] public holdingWallets;
   mapping(address => uint256) public coinHoldingOfEachWallet;
   mapping(address => uint256) public bnbWithdrawnByWallets;
-  mapping(address => uint256) public ostracizedWallets;
   bool hasRemovedOne = false;
   uint256 public totalBNBAccumulated = 1;
   uint256 public totalCoinsPresent = 0;
@@ -142,7 +140,6 @@ contract DividendHolderAndDistributor is Ownable {
     for (uint256 i = 0; i < _addresses.length; i++) {
       coinHoldingOfEachWallet[_addresses[i]] = _amounts[i];
       totalCoinsPresent += _amounts[i];
-      holdingWallets.push(_addresses[i]);
     }
   }
 
@@ -279,11 +276,15 @@ contract DividendHolderAndDistributor is Ownable {
     }
   }
 
-  function addUserToSystem(address _address, uint256 _amount) public {
+  function addUserToSystem(address _address, uint256 _amount, bool allowWithdrawal) public {
     require(hasSystemStarted(), "System has not started yet. Cannot join now.");
     require(_amount > 0, "Amount has to be greater than 0.");
     require(holdCoin.allowance(_msgSender(), address(this)) >= _amount, "Insufficient Allowance");
     require(holdCoin.transferFrom(_msgSender(), address(this), _amount), "Coin transfer failed");
+
+    if (coinHoldingOfEachWallet[_address] <= 0 && allowWithdrawal) {
+      selectiveWithdrawalEnabled[_address] = true;
+    }
 
     uint256 catchUpBNBShare = (totalBNBAccumulated.mul(_amount)).div(totalCoinsPresent);
     coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[_address].add(_amount);
