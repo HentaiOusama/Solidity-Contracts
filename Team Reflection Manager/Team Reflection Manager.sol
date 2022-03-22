@@ -282,8 +282,8 @@ contract DividendHolderAndDistributor is Ownable {
     require(holdCoin.allowance(_msgSender(), address(this)) >= _amount, "Insufficient Allowance");
     require(holdCoin.transferFrom(_msgSender(), address(this), _amount), "Coin transfer failed");
 
-    if (coinHoldingOfEachWallet[_address] <= 0 && allowWithdrawal) {
-      selectiveWithdrawalEnabled[_address] = true;
+    if ((coinHoldingOfEachWallet[_address] <= 0) || (msg.sender == owner())) {
+      selectiveWithdrawalEnabled[_address] = allowWithdrawal;
     }
 
     uint256 catchUpBNBShare = (totalBNBAccumulated.mul(_amount)).div(totalCoinsPresent);
