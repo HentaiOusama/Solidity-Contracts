@@ -254,7 +254,7 @@ contract StakingContract is Ownable {
     uint256 currentPoolToBeUpdated = 0;
     uint256 maxNumOfPoolsToBeUpdated = 50;
     PoolIdentifier[] public activePools;
-    mapping(IERC20 => mapping(IERC20 => mapping(uint256 => uint256))) indicesOfActivePools;
+    mapping(IERC20 => mapping(IERC20 => mapping(uint256 => uint256))) public indicesOfActivePools;
 
     // Stake Token => (Reward Token => (Pool Id => BasicPoolInfo))
     mapping(IERC20 => mapping(IERC20 => uint256)) public latestPoolNumber;
@@ -281,10 +281,6 @@ contract StakingContract is Ownable {
 
     function getActivePoolCount() external view returns (uint256) {
         return activePools.length;
-    }
-
-    function getActivePoolIndex(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex) public view returns (uint256) {
-        return indicesOfActivePools[_stakeToken][_rewardToken][poolIndex];
     }
 
     // View function to see LP amount staked by a user.
@@ -544,7 +540,7 @@ contract StakingContract is Ownable {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
 
-        if (basicPoolInfo.doesExists) {
+        if (basicPoolInfo.doesExists && basicPoolInfo.startBlock > 0) {
             uint256 lastRewardBlock;
 
             if (block.number < detailedPoolInfo.endBlock) {
