@@ -557,14 +557,14 @@ contract StakingContract is Ownable {
             }
 
             if (lastRewardBlock > detailedPoolInfo.lastRewardBlock) {
-                detailedPoolInfo.lastRewardBlock = lastRewardBlock;
-
                 if (detailedPoolInfo.tokensStaked > 0) {
                     uint256 noOfBlocks = lastRewardBlock.sub(detailedPoolInfo.lastRewardBlock);
                     uint256 newRewards = noOfBlocks.mul(basicPoolInfo.rewardPerBlock);
 
                     detailedPoolInfo.accRewardPerTokenStaked = detailedPoolInfo.accRewardPerTokenStaked.add(newRewards.mul(1e36).div(detailedPoolInfo.tokensStaked));
                 }
+
+                detailedPoolInfo.lastRewardBlock = lastRewardBlock;
             }
         }
     }
