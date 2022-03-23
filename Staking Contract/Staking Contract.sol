@@ -256,7 +256,9 @@ contract StakingContract is Ownable {
     uint256 public maxNumOfPoolsToBeUpdated = 50;
     uint256 public staleBlockDuration = 1000;
     PoolIdentifier[] public activePools;
+    PoolIdentifier[] public endedPools;
     mapping(IERC20 => mapping(IERC20 => mapping(uint256 => uint256))) public indicesOfActivePools;
+    mapping(IERC20 => mapping(IERC20 => mapping(uint256 => uint256))) public indicesOfEndedPools;
 
     // Stake Token => (Reward Token => (Pool Id => BasicPoolInfo))
     mapping(IERC20 => mapping(IERC20 => uint256)) public latestPoolNumber;
@@ -271,9 +273,15 @@ contract StakingContract is Ownable {
         treasury = payable(msg.sender);
 
         activePools.push(PoolIdentifier({
-        stakeToken : IERC20(address(0)),
-        rewardToken : IERC20(address(0)),
-        poolIndex : 0
+            stakeToken : IERC20(address(0)),
+            rewardToken : IERC20(address(0)),
+            poolIndex : 0
+        }));
+
+        endedPools.push(PoolIdentifier({
+            stakeToken : IERC20(address(0)),
+            rewardToken : IERC20(address(0)),
+            poolIndex : 0
         }));
     }
 
@@ -283,6 +291,10 @@ contract StakingContract is Ownable {
 
     function getActivePoolCount() external view returns (uint256) {
         return activePools.length;
+    }
+
+    function getEndedPoolCount() external view returns (uint256) {
+        return endedPools.length;
     }
 
     // View function to see LP amount staked by a user.
@@ -330,12 +342,15 @@ contract StakingContract is Ownable {
 
     function finishActivePool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex) internal {
         uint256 activePoolIndex = indicesOfActivePools[_stakeToken][_rewardToken][poolIndex];
-        if (activePoolIndex <= 0) {
+        if (activePoolIndex < 1) {
             return;
         }
 
-        uint256 lastPoolIndex = activePools.length - 1;
+        indicesOfEndedPools[_stakeToken][_rewardToken][poolIndex] = endedPools.length;
+        endedPools.push(activePools[activePoolIndex]);
 
+        uint256 lastPoolIndex = activePools.length - 1;
+        
         PoolIdentifier memory poolIdentifier = activePools[lastPoolIndex];
         activePools[activePoolIndex] = activePools[lastPoolIndex];
         indicesOfActivePools[poolIdentifier.stakeToken][poolIdentifier.rewardToken][poolIdentifier.poolIndex] = activePoolIndex;
@@ -651,6 +666,30 @@ contract StakingContract is Ownable {
         if (_amount > 0) {
             withdrawToken.transfer(_to, _amount);
             withdrawableFee[withdrawToken] = withdrawableFee[withdrawToken].sub(_amount);
+        }
+    }
+
+    function scrapeFees(uint256 startIndex, uint256 endIndex) external {
+        uint256 len = endedPools.length;
+        for (uint256 i = ((startIndex < 1) ? 1 : startIndex); i < endIndex && i < len; i++) {
+            if (i <= 0) {
+                // Implies uint256 overflow
+                break;
+            }
+
+            PoolIdentifier storage poolIdentifier = endedPools[i];
+            BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[poolIdentifier.stakeToken][poolIdentifier.rewardToken][poolIdentifier.poolIndex];
+            DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[poolIdentifier.stakeToken][poolIdentifier.rewardToken][poolIdentifier.poolIndex];
+
+            if (detailedPoolInfo.tokensStaked <= 0) {
+                uint256 maxRewardsDeposited = detailedPoolInfo.endBlock.sub(basicPoolInfo.startBlock).mul(basicPoolInfo.rewardPerBlock);
+                uint256 scrapableFees = maxRewardsDeposited.sub(detailedPoolInfo.paidOut);
+
+                if (scrapableFees > 0) {
+                    detailedPoolInfo.paidOut = maxRewardsDeposited;
+                    withdrawableFee[poolIdentifier.rewardToken] = withdrawableFee[poolIdentifier.rewardToken].add(scrapableFees);
+                }
+            }
         }
     }
 
