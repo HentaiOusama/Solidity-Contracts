@@ -298,8 +298,8 @@ contract StakingContract is Ownable {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
         UserInfo storage user = detailedPoolInfo.userInfo[_user];
-        uint256 accRewardPerTokenStaked = detailedPoolInfo.accRewardPerTokenStaked;
 
+        uint256 accRewardPerTokenStaked = detailedPoolInfo.accRewardPerTokenStaked;
         uint256 tokensStaked = detailedPoolInfo.tokensStaked;
 
         if (block.number > detailedPoolInfo.lastRewardBlock && tokensStaked != 0) {
@@ -396,6 +396,8 @@ contract StakingContract is Ownable {
         erc20.safeTransferFrom(address(msg.sender), address(this), _amount);
         uint256 endTokenBalance = erc20.balanceOf(address(this));
         uint256 trueDepositedTokens = endTokenBalance.sub(startTokenBalance);
+
+        _startBlock = (_startBlock < block.number) ? block.number : _startBlock;
 
         detailedPoolInfo.lastRewardBlock = _startBlock;
         basicPoolInfo.startBlock = _startBlock;
@@ -563,7 +565,6 @@ contract StakingContract is Ownable {
                     uint256 newRewards = noOfBlocks.mul(basicPoolInfo.rewardPerBlock);
 
                     detailedPoolInfo.accRewardPerTokenStaked = detailedPoolInfo.accRewardPerTokenStaked.add(newRewards.mul(1e36).div(detailedPoolInfo.tokensStaked));
-                    detailedPoolInfo.lastRewardBlock = lastRewardBlock;
                 }
             }
         }
