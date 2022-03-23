@@ -74,19 +74,19 @@ library SafeMath {
 library Address {
     function isContract(address account) internal view returns (bool) {
         uint256 size;
-        assembly { size := extcodesize(account) }
+        assembly {size := extcodesize(account)}
         return size > 0;
     }
 
     function sendValue(address payable recipient, uint256 amount) internal {
         require(address(this).balance >= amount, "Address: insufficient balance");
 
-        (bool success, ) = recipient.call{ value: amount }("");
+        (bool success,) = recipient.call{value : amount}("");
         require(success, "Address: unable to send value, recipient may have reverted");
     }
 
     function functionCall(address target, bytes memory data) internal returns (bytes memory) {
-      return functionCall(target, data, "Address: low-level call failed");
+        return functionCall(target, data, "Address: low-level call failed");
     }
 
     function functionCall(address target, bytes memory data, string memory errorMessage) internal returns (bytes memory) {
@@ -105,7 +105,7 @@ library Address {
     function _functionCallWithValue(address target, bytes memory data, uint256 weiValue, string memory errorMessage) private returns (bytes memory) {
         require(isContract(target), "Address: call to non-contract");
 
-        (bool success, bytes memory returndata) = target.call{ value: weiValue }(data);
+        (bool success, bytes memory returndata) = target.call{value : weiValue}(data);
         if (success) {
             return returndata;
         } else {
@@ -206,7 +206,7 @@ contract StakingContract is Ownable {
     using SafeERC20 for IERC20;
 
     struct PoolIdentifier {
-        IERC20 lpToken;
+        IERC20 stakeToken;
         IERC20 rewardToken;
         uint256 poolIndex;
     }
@@ -220,32 +220,33 @@ contract StakingContract is Ownable {
     struct BasicPoolInfo {
         bool doesExists;
         bool hasEnded;
-        IERC20 lpToken;                         // Address of LP token contract.
-        uint256 rewardPerTokenStaked;           // Accumulated ERC20s per share, times 1e36.
-        IERC20 rewardToken;                     // pool specific reward token.
-        uint256 startBlock;                     // pool specific block number when rewards start
-        uint256 rewardPerBlock;                 // pool specific reward per block
-        uint256 gasAmount;                      // eth fee charged on deposits and withdrawals (per pool)
-        uint256 minStake;                       // minimum tokens allowed to be staked
-        uint256 maxStake;                       // max tokens allowed to be staked
-        uint256 lpTokenFee;                     // divide by 1000 ie 150 is 1.5%
-        uint256 lockPeriod;                     // time in blocks needed before withdrawal
+        IERC20 stakeToken;
+        uint256 accRewardPerTokenStaked;        // (Accumulated reward per token staked) * (1e36).
+        IERC20 rewardToken;
+        uint256 startBlock;                     // Block number when reward distribution start
+        uint256 rewardPerBlock;
+        uint256 gasAmount;                      // Eth fee charged on deposits and withdrawals
+        uint256 minStake;                       // Min. tokens that need to be staked
+        uint256 maxStake;                       // Max. tokens that can be staked
+        uint256 stakeTokenFee;                  // Fee (divide by 1000, so that 100 => 0.1%)
+        uint256 lockPeriod;                     // No. of blocks for which the stake tokens are locked
     }
 
     struct DetailedPoolInfo {
-        uint256 tokensStaked;                   // allows the same token to be staked across different pools
-        uint256 paidOut;                        // total paid out by pool
-        uint256 lastRewardBlock;                // Last block number that ERC20s distribution occurs.
-        uint256 endBlock;                       // pool specific block number when rewards end
+        uint256 tokensStaked;                   // Total tokens staked with the pool
+        uint256 paidOut;                        // Total rewards distributed by pool
+        uint256 lastRewardBlock;                // Last block number when the accRewardPerTokenStaked was updated
+        uint256 endBlock;                       // Block number when reward distribution ends
         uint256 maxStakers;
         uint256 totalStakers;
-        mapping(address => UserInfo) userInfo;  // Info of each user that stakes LP tokens.
+        mapping(address => UserInfo) userInfo;  // Info of each user that stakes with the pool
     }
 
     // default eth fee for deposits and withdrawals
     // uint256 public gasAmount = 2000000000000000;
     uint256 public gasAmount = 0.005 ether;
     address payable public treasury;
+    mapping(IERC20 => uint256) public withdrawableFee;
 
     uint256 currentPoolToBeUpdated = 0;
     uint256 maxNumOfPoolsToBeUpdated = 100;
@@ -257,17 +258,17 @@ contract StakingContract is Ownable {
     mapping(IERC20 => mapping(IERC20 => mapping(uint256 => BasicPoolInfo))) public allPoolsBasicInfo;
     mapping(IERC20 => mapping(IERC20 => mapping(uint256 => DetailedPoolInfo))) public allPoolsDetailedInfo;
 
-    event Deposit(address indexed user, IERC20 indexed lpToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
-    event Withdraw(address indexed user, IERC20 indexed lpToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
-    event EmergencyWithdraw(address indexed user, IERC20 indexed lpToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
+    event Deposit(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
+    event Withdraw(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
+    event EmergencyWithdraw(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
 
     constructor() {
         treasury = payable(msg.sender);
 
         activePools.push(PoolIdentifier({
-            lpToken: IERC20(address(0)),
-            rewardToken: IERC20(address(0)),
-            poolIndex: 0
+        stakeToken : IERC20(address(0)),
+        rewardToken : IERC20(address(0)),
+        poolIndex : 0
         }));
     }
 
@@ -279,7 +280,7 @@ contract StakingContract is Ownable {
         return activePools.length;
     }
 
-    function getActivePoolIndex(IERC20 _lpToken, IERC20 _rewardToken, uint256 poolIndex) public view returns(uint256) {
+    function getActivePoolIndex(IERC20 _lpToken, IERC20 _rewardToken, uint256 poolIndex) public view returns (uint256) {
         return indicesOfActivePools[_lpToken][_rewardToken][poolIndex];
     }
 
@@ -294,18 +295,18 @@ contract StakingContract is Ownable {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_lpToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_lpToken][_rewardToken][poolIndex];
         UserInfo storage user = detailedPoolInfo.userInfo[_user];
-        uint256 rewardPerTokenStaked = basicPoolInfo.rewardPerTokenStaked;
-        
+        uint256 accRewardPerTokenStaked = basicPoolInfo.accRewardPerTokenStaked;
+
         uint256 tokensStaked = detailedPoolInfo.tokensStaked;
 
         if (block.number > detailedPoolInfo.lastRewardBlock && tokensStaked != 0) {
             uint256 lastBlock = (block.number < detailedPoolInfo.endBlock) ? block.number : detailedPoolInfo.endBlock;
             uint256 noOfBlocks = lastBlock.sub(detailedPoolInfo.lastRewardBlock);
-            uint256 erc20Reward = noOfBlocks.mul(basicPoolInfo.rewardPerBlock);
-            rewardPerTokenStaked = rewardPerTokenStaked.add(erc20Reward.mul(1e36).div(tokensStaked));
+            uint256 newRewards = noOfBlocks.mul(basicPoolInfo.rewardPerBlock);
+            accRewardPerTokenStaked = accRewardPerTokenStaked.add(newRewards.mul(1e36).div(tokensStaked));
         }
 
-        return user.amount.mul(rewardPerTokenStaked).div(1e36).sub(user.subtractableReward);
+        return user.amount.mul(accRewardPerTokenStaked).div(1e36).sub(user.subtractableReward);
     }
 
     // View function for total reward the farm has yet to pay out.
@@ -336,7 +337,7 @@ contract StakingContract is Ownable {
 
         PoolIdentifier memory poolIdentifier = activePools[lastPoolIndex];
         activePools[activePoolIndex] = activePools[lastPoolIndex];
-        indicesOfActivePools[poolIdentifier.lpToken][poolIdentifier.rewardToken][poolIdentifier.poolIndex] = activePoolIndex;
+        indicesOfActivePools[poolIdentifier.stakeToken][poolIdentifier.rewardToken][poolIdentifier.poolIndex] = activePoolIndex;
 
         indicesOfActivePools[_lpToken][_rewardToken][poolIndex] = 0;
         activePools.pop();
@@ -345,7 +346,7 @@ contract StakingContract is Ownable {
     }
 
     // Add a new lp to the pool. Can only be called by the owner.
-    // rewards are calculated per pool, so you can add the same lpToken multiple times
+    // rewards are calculated per pool, so you can add the same stakeToken multiple times
     function createNewStakingPool(IERC20 _lpToken, IERC20 _rewardToken, uint256 _rewardPerBlock) public onlyOwner {
         massUpdatePoolStatus();
 
@@ -355,7 +356,7 @@ contract StakingContract is Ownable {
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_lpToken][_rewardToken][poolIndex];
 
         basicPoolInfo.doesExists = true;
-        basicPoolInfo.lpToken = _lpToken;
+        basicPoolInfo.stakeToken = _lpToken;
         basicPoolInfo.rewardToken = _rewardToken;
         basicPoolInfo.rewardPerBlock = _rewardPerBlock;
         basicPoolInfo.gasAmount = gasAmount;
@@ -404,7 +405,7 @@ contract StakingContract is Ownable {
         detailedPoolInfo.endBlock += trueDepositedTokens.div(basicPoolInfo.rewardPerBlock);
     }
 
-    // Deposit LP tokens to VendingMachine for ERC20 allocation.
+    // Deposit staking tokens to pool.
     function stakeWithPool(IERC20 _lpToken, IERC20 _rewardToken, uint256 _amount) external payable {
         massUpdatePoolStatus();
 
@@ -422,30 +423,31 @@ contract StakingContract is Ownable {
 
         if (user.amount > 0) {
             uint256 pendingAmount = getPendingRewardsOfUser(_lpToken, _rewardToken, latestPoolNumber[_lpToken][_rewardToken], msg.sender);
-            if(pendingAmount > 0) {
+            if (pendingAmount > 0) {
                 erc20RewardTransfer(msg.sender, _lpToken, _rewardToken, latestPoolNumber[_lpToken][_rewardToken], pendingAmount);
             }
         }
 
-        uint256 startTokenBalance = basicPoolInfo.lpToken.balanceOf(address(this));
-        basicPoolInfo.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
-        uint256 endTokenBalance = basicPoolInfo.lpToken.balanceOf(address(this));
-        uint256 depositFee = basicPoolInfo.lpTokenFee.mul(endTokenBalance).div(1000);
-        uint256 trueDepositedTokens = endTokenBalance.sub(startTokenBalance).sub(depositFee);
+        uint256 startTokenBalance = basicPoolInfo.stakeToken.balanceOf(address(this));
+        basicPoolInfo.stakeToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+        uint256 endTokenBalance = basicPoolInfo.stakeToken.balanceOf(address(this));
+        uint256 trueDepositedTokens = endTokenBalance.sub(startTokenBalance);
+        uint256 depositFee = basicPoolInfo.stakeTokenFee.mul(trueDepositedTokens).div(1000);
+        trueDepositedTokens = trueDepositedTokens.sub(depositFee);
 
         user.amount = user.amount.add(trueDepositedTokens);
         user.depositStamp = block.number;
         detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.add(trueDepositedTokens);
-        user.subtractableReward = user.amount.mul(basicPoolInfo.rewardPerTokenStaked).div(1e36);
-        
+        user.subtractableReward = user.amount.mul(basicPoolInfo.accRewardPerTokenStaked).div(1e36);
+
         treasury.transfer(msg.value);
-        
+
         detailedPoolInfo.totalStakers = detailedPoolInfo.totalStakers.add(1);
 
         emit Deposit(msg.sender, _lpToken, _rewardToken, latestPoolNumber[_lpToken][_rewardToken], _amount);
     }
 
-    // Withdraw LP tokens from VendingMachine.
+    // Withdraw staking tokens from pool.
     function unstakeFromPool(IERC20 _lpToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _amount) public payable {
         massUpdatePoolStatus();
 
@@ -460,29 +462,29 @@ contract StakingContract is Ownable {
         updatePoolStatus(_lpToken, _rewardToken, poolIndex);
 
         uint256 pendingAmount = getPendingRewardsOfUser(_lpToken, _rewardToken, poolIndex, msg.sender);
-        if(pendingAmount > 0) {
+        if (pendingAmount > 0) {
             erc20RewardTransfer(msg.sender, _lpToken, _rewardToken, poolIndex, pendingAmount);
         }
-        
-        if(_amount > 0) {
+
+        if (_amount > 0) {
             require(user.depositStamp.add(basicPoolInfo.lockPeriod) <= block.number, "Lock period not fulfilled");
 
-            basicPoolInfo.lpToken.safeTransfer(address(msg.sender), _amount);
+            basicPoolInfo.stakeToken.safeTransfer(address(msg.sender), _amount);
             detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.sub(_amount);
             user.amount = user.amount.sub(_amount);
-            user.subtractableReward = user.amount.mul(basicPoolInfo.rewardPerTokenStaked).div(1e36);
+            user.subtractableReward = user.amount.mul(basicPoolInfo.accRewardPerTokenStaked).div(1e36);
 
-            if(user.amount == 0) {
+            if (user.amount <= 0) {
                 detailedPoolInfo.totalStakers = detailedPoolInfo.totalStakers.sub(1);
             }
         }
-        
+
         treasury.transfer(msg.value);
 
         emit Withdraw(msg.sender, _lpToken, _rewardToken, poolIndex, _amount);
     }
 
-    // Withdraw without caring about rewards. EMERGENCY ONLY.
+    // Withdraw without caring about rewards and lock period. EMERGENCY ONLY.
     function emergencyWithdraw(IERC20 _lpToken, IERC20 _rewardToken, uint256 poolIndex) public {
         massUpdatePoolStatus();
 
@@ -490,10 +492,8 @@ contract StakingContract is Ownable {
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_lpToken][_rewardToken][poolIndex];
         UserInfo storage user = detailedPoolInfo.userInfo[msg.sender];
 
-        require(basicPoolInfo.doesExists, "emergencyWithdraw: No such pool exists.");
-
-        if(user.amount > 0) {
-            basicPoolInfo.lpToken.safeTransfer(address(msg.sender), user.amount);
+        if (user.amount > 0) {
+            basicPoolInfo.stakeToken.safeTransfer(address(msg.sender), user.amount);
             detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.sub(user.amount);
             user.amount = 0;
             user.subtractableReward = 0;
@@ -503,7 +503,7 @@ contract StakingContract is Ownable {
         }
     }
 
-    // Transfer ERC20 and update the required ERC20 to payout all rewards
+    // Transfer reward and update the paid out reward
     function erc20RewardTransfer(address _to, IERC20 _lpToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _amount) internal {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_lpToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_lpToken][_rewardToken][poolIndex];
@@ -511,7 +511,7 @@ contract StakingContract is Ownable {
 
         try erc20.transfer(_to, _amount) {
             detailedPoolInfo.paidOut = detailedPoolInfo.paidOut.add(_amount);
-        } catch {} 
+        } catch {}
     }
 
     // Updates status of the given pool.
@@ -533,14 +533,13 @@ contract StakingContract is Ownable {
             }
 
             if (lastRewardBlock > detailedPoolInfo.lastRewardBlock) {
-                uint256 tokensStaked = detailedPoolInfo.tokensStaked;
                 detailedPoolInfo.lastRewardBlock = lastRewardBlock;
 
-                if (tokensStaked > 0) {
+                if (detailedPoolInfo.tokensStaked > 0) {
                     uint256 noOfBlocks = lastRewardBlock.sub(detailedPoolInfo.lastRewardBlock);
-                    uint256 erc20Reward = noOfBlocks.mul(basicPoolInfo.rewardPerBlock);
+                    uint256 newRewards = noOfBlocks.mul(basicPoolInfo.rewardPerBlock);
 
-                    basicPoolInfo.rewardPerTokenStaked = basicPoolInfo.rewardPerTokenStaked.add(erc20Reward.mul(1e36).div(tokensStaked));
+                    basicPoolInfo.accRewardPerTokenStaked = basicPoolInfo.accRewardPerTokenStaked.add(newRewards.mul(1e36).div(detailedPoolInfo.tokensStaked));
                     detailedPoolInfo.lastRewardBlock = lastRewardBlock;
                 }
             }
@@ -548,7 +547,7 @@ contract StakingContract is Ownable {
     }
 
     function massUpdatePoolStatus() public {
-        for(uint256 i = 0; i < maxNumOfPoolsToBeUpdated; i++) {
+        for (uint256 i = 0; i < maxNumOfPoolsToBeUpdated; i++) {
             if (activePools.length < 2) {
                 return;
             }
@@ -557,7 +556,7 @@ contract StakingContract is Ownable {
             }
 
             updatePoolStatus(
-                activePools[currentPoolToBeUpdated].lpToken,
+                activePools[currentPoolToBeUpdated].stakeToken,
                 activePools[currentPoolToBeUpdated].rewardToken,
                 activePools[currentPoolToBeUpdated].poolIndex
             );
@@ -566,8 +565,8 @@ contract StakingContract is Ownable {
         }
     }
 
-    // Increase no. of users that can stake with in a pool
-    function increasePoolMaxStakers(IERC20 _lpToken, IERC20 _rewardToken, uint256 _maxStakers) public onlyOwner {
+    // Change no. of users that can stake with in a pool
+    function changePoolMaxStakers(IERC20 _lpToken, IERC20 _rewardToken, uint256 _maxStakers) public onlyOwner {
         uint256 poolIndex = latestPoolNumber[_lpToken][_rewardToken];
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_lpToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_lpToken][_rewardToken][poolIndex];
@@ -575,19 +574,21 @@ contract StakingContract is Ownable {
 
         detailedPoolInfo.maxStakers = (_maxStakers < detailedPoolInfo.totalStakers) ? detailedPoolInfo.totalStakers : _maxStakers;
     }
-    
+
     // Adjusts Gas Fee
-    function adjustGasGlobal(uint256 newgas) public onlyOwner {
-        gasAmount = newgas;
+    function adjustGasGlobal(uint256 newGas) public onlyOwner {
+        gasAmount = newGas;
     }
-    function adjustPoolGas(IERC20 _lpToken, IERC20 _rewardToken, uint256 poolIndex, uint256 newgas) public onlyOwner {
-        allPoolsBasicInfo[_lpToken][_rewardToken][poolIndex].gasAmount = newgas;
+
+    function adjustPoolGas(IERC20 _lpToken, IERC20 _rewardToken, uint256 poolIndex, uint256 newGas) public onlyOwner {
+        allPoolsBasicInfo[_lpToken][_rewardToken][poolIndex].gasAmount = newGas;
     }
 
     // Treasury Management
     function changeTreasury(address payable newTreasury) public onlyOwner {
         treasury = newTreasury;
     }
+
     function transfer() public onlyOwner {
         treasury.transfer(address(this).balance);
     }
