@@ -243,12 +243,16 @@ contract StakingContract is Ownable {
         mapping(address => UserInfo) userInfo;  // Info of each user that stakes with the pool
     }
 
+    IERC20 public accessToken = IERC20(address(0));
+    uint256 public minAccessTokenRequired = 0;
+    bool public requireAccessToken = false;
+
     uint256 public gasAmount = 0.005 ether;
     address payable public treasury;
     mapping(IERC20 => uint256) public withdrawableFee;
 
     uint256 currentPoolToBeUpdated = 0;
-    uint256 maxNumOfPoolsToBeUpdated = 100;
+    uint256 maxNumOfPoolsToBeUpdated = 50;
     PoolIdentifier[] public activePools;
     mapping(IERC20 => mapping(IERC20 => mapping(uint256 => uint256))) indicesOfActivePools;
 
@@ -370,7 +374,7 @@ contract StakingContract is Ownable {
         basicPoolInfo.minStake = _minStake;
         basicPoolInfo.maxStake = (_maxStake <= 0) ? ~uint256(0) : _maxStake;
         basicPoolInfo.stakeTokenDepositFee = 0;
-        basicPoolInfo.stakeTokenWithdrawFee = 2;
+        basicPoolInfo.stakeTokenWithdrawFee = 20;
         basicPoolInfo.lockPeriod = _lockBlocks;
         detailedPoolInfo.maxStakers = (_maxStakers <= 0) ? ~uint256(0) : _maxStakers;
 
@@ -419,6 +423,10 @@ contract StakingContract is Ownable {
     // Deposit staking tokens to pool.
     function stakeWithPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount) external payable {
         massUpdatePoolStatus();
+
+        if (requireAccessToken) {
+            require(accessToken.balanceOf(msg.sender) >= minAccessTokenRequired, "Insufficient access token held by staker");
+        }
 
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
@@ -481,7 +489,7 @@ contract StakingContract is Ownable {
         if (_amount > 0) {
             require(user.depositStamp.add(basicPoolInfo.lockPeriod) <= block.number, "Lock period not fulfilled");
 
-            uint256 withdrawFee = _amount.mul(basicPoolInfo.stakeTokenWithdrawFee).div(1000);
+            uint256 withdrawFee = basicPoolInfo.stakeTokenWithdrawFee.mul(_amount).div(1000);
             withdrawableFee[_stakeToken] = withdrawableFee[_stakeToken].add(withdrawFee);
             
             basicPoolInfo.stakeToken.safeTransfer(address(msg.sender), _amount.sub(withdrawFee));
@@ -585,9 +593,33 @@ contract StakingContract is Ownable {
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
+        
+        require(basicPoolInfo.doesExists, "No such pool exists.");
         require(basicPoolInfo.doesExists, "No such pool exists.");
 
         detailedPoolInfo.maxStakers = (_maxStakers < detailedPoolInfo.totalStakers) ? detailedPoolInfo.totalStakers : _maxStakers;
+    }
+
+    // Change deposit fee
+    function changeDepositFee(IERC20 _stakeToken, IERC20 _rewardToken, uint256 fee) public onlyOwner {
+        uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
+        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
+
+        require(basicPoolInfo.doesExists, "No such pool exists.");
+        require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
+
+        basicPoolInfo.stakeTokenDepositFee = fee;
+    }
+
+    // Change withdraw fee
+    function changeWithdrawFee(IERC20 _stakeToken, IERC20 _rewardToken, uint256 fee) public onlyOwner {
+        uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
+        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
+        
+        require(basicPoolInfo.doesExists, "No such pool exists.");
+        require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
+
+        basicPoolInfo.stakeTokenWithdrawFee = fee;
     }
 
     // Adjusts Gas Fee
@@ -595,8 +627,13 @@ contract StakingContract is Ownable {
         gasAmount = newGas;
     }
 
-    function adjustPoolGas(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 newGas) public onlyOwner {
-        allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex].gasAmount = newGas;
+    function adjustPoolGas(IERC20 _stakeToken, IERC20 _rewardToken, uint256 newGas) public onlyOwner {
+        uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
+        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
+        
+        require(basicPoolInfo.doesExists, "No such pool exists.");
+
+        basicPoolInfo.gasAmount = newGas;
     }
 
     // Treasury Management
@@ -608,6 +645,34 @@ contract StakingContract is Ownable {
         treasury.transfer(address(this).balance);
     }
 
+    function withdrawFees(IERC20 withdrawToken, address _to, uint256 _amount) external onlyOwner {
+        require(withdrawableFee[withdrawToken] >= _amount, "Withdraw amount exceeds generated fee amount");
+
+        if (_amount > 0) {
+            withdrawToken.transfer(_to, _amount);
+            withdrawableFee[withdrawToken] = withdrawableFee[withdrawToken].sub(_amount);
+        }
+    }
+
+    // Handling Access Token
+    function setAccessToken(IERC20 _accessToken) public onlyOwner {
+        require(address(_accessToken) != address(0), "Access Token cannot be zero address");
+        accessToken = _accessToken;
+    }
+
+    function setRequireAccessToken(bool required) public onlyOwner {
+        if (required) {
+            require(address(accessToken) != address(0), "Cannot set to true while access token is zero address");
+        }
+
+        requireAccessToken = required;
+    }
+
+    function setMinAccessTokenRequired(uint256 _minAccessTokenRequired) public onlyOwner {
+        minAccessTokenRequired = _minAccessTokenRequired;
+    }
+
+    // Handling mass update
     function changeMaxNumOfPoolsToBeUpdated(uint256 num) external onlyOwner {
         maxNumOfPoolsToBeUpdated = num;
     }
