@@ -222,6 +222,7 @@ contract StakingContract is Ownable {
         bool hasEnded;
         IERC20 stakeToken;
         IERC20 rewardToken;
+        uint256 createBlock;                    // Block number when the pool was created
         uint256 startBlock;                     // Block number when reward distribution start
         uint256 rewardPerBlock;
         uint256 gasAmount;                      // Eth fee charged on deposits and withdrawals
@@ -251,8 +252,9 @@ contract StakingContract is Ownable {
     address payable public treasury;
     mapping(IERC20 => uint256) public withdrawableFee;
 
-    uint256 currentPoolToBeUpdated = 0;
-    uint256 maxNumOfPoolsToBeUpdated = 50;
+    uint256 public currentPoolToBeUpdated = 0;
+    uint256 public maxNumOfPoolsToBeUpdated = 50;
+    uint256 public staleBlockDuration = 1000;
     PoolIdentifier[] public activePools;
     mapping(IERC20 => mapping(IERC20 => mapping(uint256 => uint256))) public indicesOfActivePools;
 
@@ -365,6 +367,7 @@ contract StakingContract is Ownable {
         basicPoolInfo.doesExists = true;
         basicPoolInfo.stakeToken = _stakeToken;
         basicPoolInfo.rewardToken = _rewardToken;
+        basicPoolInfo.createBlock = block.number;
         basicPoolInfo.rewardPerBlock = _rewardPerBlock;
         basicPoolInfo.gasAmount = gasAmount;
         basicPoolInfo.minStake = _minStake;
@@ -540,7 +543,7 @@ contract StakingContract is Ownable {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
 
-        if (basicPoolInfo.doesExists && basicPoolInfo.startBlock > 0) {
+        if (basicPoolInfo.doesExists && ((basicPoolInfo.startBlock > 0) || (basicPoolInfo.createBlock < block.number.sub(staleBlockDuration)))) {
             uint256 lastRewardBlock;
 
             if (block.number < detailedPoolInfo.endBlock) {
@@ -672,5 +675,10 @@ contract StakingContract is Ownable {
     // Handling mass update
     function changeMaxNumOfPoolsToBeUpdated(uint256 num) external onlyOwner {
         maxNumOfPoolsToBeUpdated = num;
+    }
+
+    function changeStaleBlockDuration(uint256 _blockCount) external onlyOwner {
+        require(_blockCount > 0, "Block count has to be greater than 0");
+        staleBlockDuration = _blockCount;
     }
 }
