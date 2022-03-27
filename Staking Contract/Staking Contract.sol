@@ -249,6 +249,8 @@ contract StakingContract is Ownable {
     bool public requireAccessToken = false;
 
     uint256 public gasAmount = 0.005 ether;
+    uint256 public defaultDepositFee = 0;
+    uint256 public defaultWithdrawFee = 20;
     address payable public treasury;
     mapping(IERC20 => uint256) public withdrawableFee;
 
@@ -373,6 +375,10 @@ contract StakingContract is Ownable {
         }
 
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
+
+        updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
+        poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
+
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
 
@@ -387,8 +393,8 @@ contract StakingContract is Ownable {
         basicPoolInfo.gasAmount = gasAmount;
         basicPoolInfo.minStake = _minStake;
         basicPoolInfo.maxStake = (_maxStake <= 0) ? ~uint256(0) : _maxStake;
-        basicPoolInfo.stakeTokenDepositFee = 0;
-        basicPoolInfo.stakeTokenWithdrawFee = 20;
+        basicPoolInfo.stakeTokenDepositFee = defaultDepositFee;
+        basicPoolInfo.stakeTokenWithdrawFee = defaultWithdrawFee;
         detailedPoolInfo.maxStakers = (_maxStakers <= 0) ? ~uint256(0) : _maxStakers;
 
         indicesOfActivePools[_stakeToken][_rewardToken][poolIndex] = activePools.length;
@@ -454,7 +460,7 @@ contract StakingContract is Ownable {
         require(block.number >= basicPoolInfo.startBlock, "stakeWithPool: Pool reward distribution has not been started yet.");
         require(detailedPoolInfo.totalStakers < detailedPoolInfo.maxStakers, "Max stakers reached!");
         require(msg.value >= basicPoolInfo.gasAmount, "Insufficient Value for the trx.");
-        require(_amount >= basicPoolInfo.minStake && (_amount.add(user.amount)) <= basicPoolInfo.maxStake, "Stake amount out of range.");
+        require((_amount.add(user.amount) >= basicPoolInfo.minStake) && (_amount.add(user.amount) <= basicPoolInfo.maxStake), "Stake amount out of range.");
 
         if (requireAccessToken) {
             require(accessToken.balanceOf(msg.sender) >= minAccessTokenRequired, "Insufficient access token held by staker");
@@ -638,6 +644,11 @@ contract StakingContract is Ownable {
         basicPoolInfo.stakeTokenDepositFee = fee;
     }
 
+    function setDefaultDepositFee(uint256 fee) public onlyOwner {
+        require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
+        defaultDepositFee = fee;
+    }
+
     // Change withdraw fee
     function changeWithdrawFee(IERC20 _stakeToken, IERC20 _rewardToken, uint256 fee) public onlyOwner {
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
@@ -647,6 +658,11 @@ contract StakingContract is Ownable {
         require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
 
         basicPoolInfo.stakeTokenWithdrawFee = fee;
+    }
+
+    function setDefaultWithdrawFee(uint256 fee) public onlyOwner {
+        require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
+        defaultWithdrawFee = fee;
     }
 
     // Adjusts Gas Fee
