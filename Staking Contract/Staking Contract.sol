@@ -253,7 +253,7 @@ contract StakingContract is Ownable {
     mapping(IERC20 => uint256) public withdrawableFee;
 
     uint256 public currentPoolToBeUpdated = 0;
-    uint256 public maxNumOfPoolsToBeUpdated = 50;
+    uint256 public massUpdatePoolCount = 25;
     uint256 public staleBlockDuration = 1000;
     PoolIdentifier[] public activePools;
     PoolIdentifier[] public endedPools;
@@ -267,6 +267,7 @@ contract StakingContract is Ownable {
 
     event Deposit(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
     event Withdraw(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
+    event ReceivedReward(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
     event EmergencyWithdraw(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
 
     constructor() {
@@ -290,11 +291,11 @@ contract StakingContract is Ownable {
     }
 
     function getActivePoolCount() external view returns (uint256) {
-        return activePools.length;
+        return activePools.length - 1;
     }
 
     function getEndedPoolCount() external view returns (uint256) {
-        return endedPools.length;
+        return endedPools.length - 1;
     }
 
     // View function to see LP amount staked by a user.
@@ -323,7 +324,7 @@ contract StakingContract is Ownable {
     }
 
     // View function for total reward the farm has yet to pay out.
-    function getTotalPendingRewardsOfPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex) external view returns (uint256) {
+    function getPendingRewardsOfPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex) external view returns (uint256) {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
         if (block.number <= basicPoolInfo.startBlock) {
@@ -336,10 +337,6 @@ contract StakingContract is Ownable {
         return (basicPoolInfo.rewardPerBlock.mul(elapsedBlockCount)).sub(detailedPoolInfo.paidOut);
     }
 
-    function getRewardPerBlockOfPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex) external view returns (uint) {
-        return allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex].rewardPerBlock;
-    }
-
     function finishActivePool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex) internal {
         uint256 activePoolIndex = indicesOfActivePools[_stakeToken][_rewardToken][poolIndex];
         if (activePoolIndex < 1) {
@@ -350,7 +347,7 @@ contract StakingContract is Ownable {
         endedPools.push(activePools[activePoolIndex]);
 
         uint256 lastPoolIndex = activePools.length - 1;
-        
+
         PoolIdentifier memory poolIdentifier = activePools[lastPoolIndex];
         activePools[activePoolIndex] = activePools[lastPoolIndex];
         indicesOfActivePools[poolIdentifier.stakeToken][poolIdentifier.rewardToken][poolIdentifier.poolIndex] = activePoolIndex;
@@ -369,15 +366,18 @@ contract StakingContract is Ownable {
         uint256 _rewardPerBlock,
         uint256 _minStake,
         uint256 _maxStake,
-        uint256 _lockBlocks,
         uint256 _maxStakers
-    ) public onlyOwner {
-        massUpdatePoolStatus();
+    ) public onlyOwner returns (uint256) {
+        if (latestPoolNumber[_stakeToken][_rewardToken] < 1) {
+            latestPoolNumber[_stakeToken][_rewardToken] = 1;
+        }
 
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
-        require(!basicPoolInfo.doesExists, "This pool already exists.");
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
+
+        require(!basicPoolInfo.doesExists, "This pool already exists.");
+        massUpdatePoolStatus();
 
         basicPoolInfo.doesExists = true;
         basicPoolInfo.stakeToken = _stakeToken;
@@ -389,20 +389,22 @@ contract StakingContract is Ownable {
         basicPoolInfo.maxStake = (_maxStake <= 0) ? ~uint256(0) : _maxStake;
         basicPoolInfo.stakeTokenDepositFee = 0;
         basicPoolInfo.stakeTokenWithdrawFee = 20;
-        basicPoolInfo.lockPeriod = _lockBlocks;
         detailedPoolInfo.maxStakers = (_maxStakers <= 0) ? ~uint256(0) : _maxStakers;
 
         indicesOfActivePools[_stakeToken][_rewardToken][poolIndex] = activePools.length;
         activePools.push(PoolIdentifier(_stakeToken, _rewardToken, poolIndex));
+
+        return poolIndex;
     }
 
     // Fund the pool, consequently setting the end block
-    function performInitialFunding(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount, uint256 _startBlock) public {
+    function performInitialFunding(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount, uint256 _startBlock, uint256 _lockBlocks) public {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
 
         require(basicPoolInfo.doesExists, "performInitialFunding: No such pool exists.");
         require(basicPoolInfo.startBlock == 0, "performInitialFunding: Initial funding already complete");
+        require(_startBlock <= block.number.add(staleBlockDuration), "performInitialFunding: Start Block cannot be more than staleBlockDuration from current block.");
 
         IERC20 erc20 = basicPoolInfo.rewardToken;
 
@@ -416,21 +418,25 @@ contract StakingContract is Ownable {
         detailedPoolInfo.lastRewardBlock = _startBlock;
         basicPoolInfo.startBlock = _startBlock;
         detailedPoolInfo.endBlock = _startBlock.add(trueDepositedTokens.div(basicPoolInfo.rewardPerBlock));
+
+        require(_lockBlocks <= detailedPoolInfo.endBlock.sub(_startBlock), "Lock duration cannot be more than initial running duration of the pool.");
+        basicPoolInfo.lockPeriod = _lockBlocks;
     }
 
     // Increase the funds the pool, consequently increasing the end block
     function increasePoolFunding(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount) public {
-        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
-        DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
+        uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
+        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
+        DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
+
+        updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
 
         require(basicPoolInfo.doesExists, "increasePoolFunding: No such pool exists.");
         require(block.number < detailedPoolInfo.endBlock, "increasePoolFunding: Pool closed or perform initial funding first");
 
-        IERC20 erc20 = basicPoolInfo.rewardToken;
-
-        uint256 startTokenBalance = erc20.balanceOf(address(this));
-        erc20.safeTransferFrom(address(msg.sender), address(this), _amount);
-        uint256 endTokenBalance = erc20.balanceOf(address(this));
+        uint256 startTokenBalance = _rewardToken.balanceOf(address(this));
+        _rewardToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+        uint256 endTokenBalance = _rewardToken.balanceOf(address(this));
         uint256 trueDepositedTokens = endTokenBalance.sub(startTokenBalance);
 
         detailedPoolInfo.endBlock += trueDepositedTokens.div(basicPoolInfo.rewardPerBlock);
@@ -438,23 +444,24 @@ contract StakingContract is Ownable {
 
     // Deposit staking tokens to pool.
     function stakeWithPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount) external payable {
-        massUpdatePoolStatus();
+        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
+        DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
+        UserInfo storage user = detailedPoolInfo.userInfo[msg.sender];
+
+        require(basicPoolInfo.doesExists, "stakeWithPool: No such pool exists.");
+        require(!basicPoolInfo.hasEnded, "stakeWithPool: Pool has already ended.");
+        require(basicPoolInfo.startBlock > 0, "stakeWithPool: Pool has not been funded yet.");
+        require(block.number >= basicPoolInfo.startBlock, "stakeWithPool: Pool reward distribution has not been started yet.");
+        require(detailedPoolInfo.totalStakers < detailedPoolInfo.maxStakers, "Max stakers reached!");
+        require(msg.value >= basicPoolInfo.gasAmount, "Insufficient Value for the trx.");
+        require(_amount >= basicPoolInfo.minStake && (_amount.add(user.amount)) <= basicPoolInfo.maxStake, "Stake amount out of range.");
 
         if (requireAccessToken) {
             require(accessToken.balanceOf(msg.sender) >= minAccessTokenRequired, "Insufficient access token held by staker");
         }
 
-        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
-        DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
-        UserInfo storage user = detailedPoolInfo.userInfo[msg.sender];
-
+        massUpdatePoolStatus();
         updatePoolStatus(_stakeToken, _rewardToken, latestPoolNumber[_stakeToken][_rewardToken]);
-
-        require(basicPoolInfo.doesExists, "stakeWithPool: No such pool exists.");
-        require(!basicPoolInfo.hasEnded, "stakeWithPool: Pool has already ended.");
-        require(detailedPoolInfo.totalStakers < detailedPoolInfo.maxStakers, "Max stakers reached!");
-        require(msg.value >= basicPoolInfo.gasAmount, "Insufficient Value for the trx.");
-        require(_amount >= basicPoolInfo.minStake && (_amount.add(user.amount)) <= basicPoolInfo.maxStake, "Stake amount out of range.");
 
         if (user.amount > 0) {
             uint256 pendingAmount = getPendingRewardsOfUser(_stakeToken, _rewardToken, latestPoolNumber[_stakeToken][_rewardToken], msg.sender);
@@ -472,9 +479,12 @@ contract StakingContract is Ownable {
         trueDepositedTokens = trueDepositedTokens.sub(depositFee);
 
         user.amount = user.amount.add(trueDepositedTokens);
-        user.depositStamp = block.number;
         detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.add(trueDepositedTokens);
         user.subtractableReward = user.amount.mul(detailedPoolInfo.accRewardPerTokenStaked).div(1e36);
+
+        if (user.depositStamp <= 0) {
+            user.depositStamp = block.number;
+        }
 
         treasury.transfer(msg.value);
 
@@ -485,16 +495,15 @@ contract StakingContract is Ownable {
 
     // Withdraw staking tokens from pool.
     function unstakeFromPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _amount) public payable {
-        massUpdatePoolStatus();
-
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
         UserInfo storage user = detailedPoolInfo.userInfo[msg.sender];
 
         require(basicPoolInfo.doesExists, "unstakeFromPool: No such pool exists.");
-        require(msg.value >= basicPoolInfo.gasAmount, "Correct gas amount must be sent!");
-        require(user.amount >= _amount, "unstakeFromPool: Can't withdraw more than deposit");
+        require(user.amount >= _amount, "unstakeFromPool: Can't withdraw more than deposited amount.");
+        require(user.depositStamp.add(basicPoolInfo.lockPeriod) <= block.number, "unstakeFromPool: Lock period not fulfilled");
 
+        massUpdatePoolStatus();
         updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
 
         uint256 pendingAmount = getPendingRewardsOfUser(_stakeToken, _rewardToken, poolIndex, msg.sender);
@@ -503,24 +512,27 @@ contract StakingContract is Ownable {
         }
 
         if (_amount > 0) {
-            require(user.depositStamp.add(basicPoolInfo.lockPeriod) <= block.number, "Lock period not fulfilled");
+            require(msg.value >= basicPoolInfo.gasAmount, "unstakeFromPool: Correct transaction value must be sent.");
 
             uint256 withdrawFee = basicPoolInfo.stakeTokenWithdrawFee.mul(_amount).div(1000);
             withdrawableFee[_stakeToken] = withdrawableFee[_stakeToken].add(withdrawFee);
-            
+
             basicPoolInfo.stakeToken.safeTransfer(address(msg.sender), _amount.sub(withdrawFee));
             detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.sub(_amount);
             user.amount = user.amount.sub(_amount);
-            user.subtractableReward = user.amount.mul(detailedPoolInfo.accRewardPerTokenStaked).div(1e36);
 
             if (user.amount <= 0) {
                 detailedPoolInfo.totalStakers = detailedPoolInfo.totalStakers.sub(1);
             }
+
+            emit Withdraw(msg.sender, _stakeToken, _rewardToken, poolIndex, _amount);
         }
 
-        treasury.transfer(msg.value);
+        user.subtractableReward = user.amount.mul(detailedPoolInfo.accRewardPerTokenStaked).div(1e36);
 
-        emit Withdraw(msg.sender, _stakeToken, _rewardToken, poolIndex, _amount);
+        if (msg.value > 0) {
+            treasury.transfer(msg.value);
+        }
     }
 
     // Withdraw without caring about rewards and lock period. EMERGENCY ONLY.
@@ -550,6 +562,7 @@ contract StakingContract is Ownable {
 
         try erc20.transfer(_to, _amount) {
             detailedPoolInfo.paidOut = detailedPoolInfo.paidOut.add(_amount);
+            emit ReceivedReward(_to, _stakeToken, _rewardToken, poolIndex, _amount);
         } catch {}
     }
 
@@ -585,7 +598,7 @@ contract StakingContract is Ownable {
     }
 
     function massUpdatePoolStatus() public {
-        for (uint256 i = 0; i < maxNumOfPoolsToBeUpdated; i++) {
+        for (uint256 i = 0; i < massUpdatePoolCount; i++) {
             if (activePools.length < 2) {
                 return;
             }
@@ -608,8 +621,7 @@ contract StakingContract is Ownable {
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
-        
-        require(basicPoolInfo.doesExists, "No such pool exists.");
+
         require(basicPoolInfo.doesExists, "No such pool exists.");
 
         detailedPoolInfo.maxStakers = (_maxStakers < detailedPoolInfo.totalStakers) ? detailedPoolInfo.totalStakers : _maxStakers;
@@ -630,7 +642,7 @@ contract StakingContract is Ownable {
     function changeWithdrawFee(IERC20 _stakeToken, IERC20 _rewardToken, uint256 fee) public onlyOwner {
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
-        
+
         require(basicPoolInfo.doesExists, "No such pool exists.");
         require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
 
@@ -645,7 +657,7 @@ contract StakingContract is Ownable {
     function adjustPoolGas(IERC20 _stakeToken, IERC20 _rewardToken, uint256 newGas) public onlyOwner {
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
-        
+
         require(basicPoolInfo.doesExists, "No such pool exists.");
 
         basicPoolInfo.gasAmount = newGas;
@@ -671,8 +683,10 @@ contract StakingContract is Ownable {
 
     function scrapeFees(uint256 startIndex, uint256 endIndex) external {
         uint256 len = endedPools.length;
-        for (uint256 i = ((startIndex < 1) ? 1 : startIndex); i < endIndex && i < len; i++) {
-            if (i <= 0) {
+        endIndex = (endIndex >= len) ? len - 1 : endIndex;
+
+        for (uint256 i = ((startIndex < 1) ? 1 : startIndex); i <= endIndex && i < len; i++) {
+            if (i < 1) {
                 // Implies uint256 overflow
                 break;
             }
@@ -682,6 +696,8 @@ contract StakingContract is Ownable {
             DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[poolIdentifier.stakeToken][poolIdentifier.rewardToken][poolIdentifier.poolIndex];
 
             if (detailedPoolInfo.tokensStaked <= 0) {
+                // Implies everyone has withdrawn their stake tokens, or no tokens were staked.
+
                 uint256 maxRewardsDeposited = detailedPoolInfo.endBlock.sub(basicPoolInfo.startBlock).mul(basicPoolInfo.rewardPerBlock);
                 uint256 scrapableFees = maxRewardsDeposited.sub(detailedPoolInfo.paidOut);
 
@@ -712,12 +728,12 @@ contract StakingContract is Ownable {
     }
 
     // Handling mass update
-    function changeMaxNumOfPoolsToBeUpdated(uint256 num) external onlyOwner {
-        maxNumOfPoolsToBeUpdated = num;
+    function setMassUpdatePoolCount(uint256 count) external onlyOwner {
+        massUpdatePoolCount = count;
     }
 
-    function changeStaleBlockDuration(uint256 _blockCount) external onlyOwner {
-        require(_blockCount > 0, "Block count has to be greater than 0");
-        staleBlockDuration = _blockCount;
+    function setStaleBlockDuration(uint256 blockCount) external onlyOwner {
+        require(blockCount > 0, "Block count has to be greater than 0");
+        staleBlockDuration = blockCount;
     }
 }
