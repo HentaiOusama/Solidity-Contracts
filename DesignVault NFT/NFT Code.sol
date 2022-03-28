@@ -327,14 +327,26 @@ contract Authorizable is Ownable {
   }
 }
 
-contract DesignVaultNFT is NFTokenMetadata, Authorizable {
-  constructor() {
-    nftName = "Design Vault NFT";
-    nftSymbol = "DV-NFT";
+contract NFT_ERC_721 is NFTokenMetadata, Authorizable {
+
+  uint256 nextTokenId = 1;
+
+  constructor(string memory name, string memory symbol) {
+    nftName = name;
+    nftSymbol = symbol;
   }
 
-  function mint(address _to, uint256 _tokenId, string calldata _uri) external onlyAuthorized() {
-    super._mint(_to, _tokenId);
-    super._setTokenUri(_tokenId, _uri);
+  function setTokenName(string calldata name) external onlyOwner() {
+    nftName = name;
+  }
+
+  function setTokenSymbol(string calldata symbol) external onlyOwner() {
+    nftSymbol = symbol;
+  }
+
+  function mint(address _to, string calldata _uri) external onlyAuthorized() {
+    super._mint(_to, nextTokenId);
+    super._setTokenUri(nextTokenId, _uri);
+    nextTokenId += 1;
   }
 }
