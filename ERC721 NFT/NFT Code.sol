@@ -7,14 +7,15 @@ library AddressUtils {
     bytes32 codeHash;
     bytes32 accountHash = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
     assembly {codeHash := extcodehash(_address)}
-    // solhint-disable-line
     addressCheck = (codeHash != 0x0 && codeHash != accountHash);
   }
 }
 
+
 interface ERC165 {
   function supportsInterface(bytes4 _interfaceID) external view returns (bool);
 }
+
 interface ERC721Metadata {
   function name() external view returns (string memory _name);
 
@@ -22,6 +23,7 @@ interface ERC721Metadata {
 
   function tokenURI(uint256 _tokenId) external view returns (string memory);
 }
+
 interface ERC721 {
   event Transfer(
     address indexed _from,
@@ -59,6 +61,7 @@ interface ERC721 {
 
   function isApprovedForAll(address _owner, address _operator) external view returns (bool);
 }
+
 interface ERC721TokenReceiver {
   function onERC721Received(address _operator, address _from, uint256 _tokenId, bytes calldata _data) external returns (bytes4);
 }
@@ -75,7 +78,30 @@ contract SupportsInterface is ERC165 {
     return supportedInterfaces[_interfaceID];
   }
 }
-contract NFToken is ERC721, SupportsInterface {
+
+abstract contract NFTokenMetadata is ERC721Metadata {
+  string internal nftName;
+  string internal nftSymbol;
+  mapping(uint256 => string) internal idToUri;
+
+  function name() external override view returns (string memory _name) {
+    _name = nftName;
+  }
+
+  function symbol() external override view returns (string memory _symbol) {
+    _symbol = nftSymbol;
+  }
+
+  function _tokenURI(uint256 _tokenId) internal virtual view returns (string memory) {
+    return idToUri[_tokenId];
+  }
+
+  function _setTokenUri(uint256 _tokenId, string memory _uri) internal virtual {
+    idToUri[_tokenId] = _uri;
+  }
+}
+
+contract NFToken is ERC721, NFTokenMetadata, SupportsInterface {
   using AddressUtils for address;
 
   string constant ZERO_ADDRESS = "003001";
@@ -87,10 +113,6 @@ contract NFToken is ERC721, SupportsInterface {
   string constant NOT_OWNER = "003007";
   string constant IS_OWNER = "003008";
 
-  /**
-   * @dev Magic value of a smart contract that can receive NFT.
-   * Equal to: bytes4(keccak256("onERC721Received(address,address,uint256,bytes)")).
-   */
   bytes4 internal constant MAGIC_ON_ERC721_RECEIVED = 0x150b7a02;
 
   mapping(uint256 => address) internal idToOwner;
@@ -127,20 +149,12 @@ contract NFToken is ERC721, SupportsInterface {
     supportedInterfaces[0x80ac58cd] = true;
   }
 
-  function safeTransferFrom(address _from, address _to, uint256 _tokenId, bytes calldata _data) external override {
-    _safeTransferFrom(_from, _to, _tokenId, _data);
+  function tokenURI(uint256 _tokenId) external override view validNFToken(_tokenId) returns (string memory) {
+    return _tokenURI(_tokenId);
   }
 
-  function safeTransferFrom(address _from, address _to, uint256 _tokenId) external override {
-    _safeTransferFrom(_from, _to, _tokenId, "");
-  }
-
-  function transferFrom(address _from, address _to, uint256 _tokenId) external override canTransfer(_tokenId) validNFToken(_tokenId) {
-    address tokenOwner = idToOwner[_tokenId];
-    require(tokenOwner == _from, NOT_OWNER);
-    require(_to != address(0), ZERO_ADDRESS);
-
-    _transfer(_to, _tokenId);
+  function _setTokenUri(uint256 _tokenId, string memory _uri) internal override validNFToken(_tokenId) {
+    super._setTokenUri(_tokenId, _uri);
   }
 
   function approve(address _approved, uint256 _tokenId) external override canOperate(_tokenId) validNFToken(_tokenId) {
@@ -174,14 +188,38 @@ contract NFToken is ERC721, SupportsInterface {
     return ownerToOperators[_owner][_operator];
   }
 
-  function _transfer(address _to, uint256 _tokenId) internal virtual {
-    address from = idToOwner[_tokenId];
+  function safeTransferFrom(address _from, address _to, uint256 _tokenId, bytes calldata _data) external override {
+    _safeTransferFrom(_from, _to, _tokenId, _data);
+  }
+
+  function safeTransferFrom(address _from, address _to, uint256 _tokenId) external override {
+    _safeTransferFrom(_from, _to, _tokenId, "");
+  }
+
+  function transferFrom(address _from, address _to, uint256 _tokenId) public override canTransfer(_tokenId) validNFToken(_tokenId) {
+    address tokenOwner = idToOwner[_tokenId];
+    require(tokenOwner == _from, NOT_OWNER);
+    require(_to != address(0), ZERO_ADDRESS);
+
+    _transferFrom(tokenOwner, _to, _tokenId);
+  }
+
+  function _safeTransferFrom(address _from, address _to, uint256 _tokenId, bytes memory _data) private {
+    transferFrom(_from, _to, _tokenId);
+
+    if (_to.isContract()) {
+      bytes4 retval = ERC721TokenReceiver(_to).onERC721Received(msg.sender, _from, _tokenId, _data);
+      require(retval == MAGIC_ON_ERC721_RECEIVED, NOT_ABLE_TO_RECEIVE_NFT);
+    }
+  }
+
+  function _transferFrom(address _from, address _to, uint256 _tokenId) internal virtual {
     _clearApproval(_tokenId);
 
-    _removeNFToken(from, _tokenId);
+    _removeNFToken(_from, _tokenId);
     _addNFToken(_to, _tokenId);
 
-    emit Transfer(from, _to, _tokenId);
+    emit Transfer(_from, _to, _tokenId);
   }
 
   function _mint(address _to, uint256 _tokenId) internal virtual {
@@ -197,6 +235,7 @@ contract NFToken is ERC721, SupportsInterface {
     address tokenOwner = idToOwner[_tokenId];
     _clearApproval(_tokenId);
     _removeNFToken(tokenOwner, _tokenId);
+    delete idToUri[_tokenId];
     emit Transfer(tokenOwner, address(0), _tokenId);
   }
 
@@ -217,55 +256,8 @@ contract NFToken is ERC721, SupportsInterface {
     return ownerToNFTokenCount[_owner];
   }
 
-  function _safeTransferFrom(address _from, address _to, uint256 _tokenId, bytes memory _data) private canTransfer(_tokenId) validNFToken(_tokenId) {
-    address tokenOwner = idToOwner[_tokenId];
-    require(tokenOwner == _from, NOT_OWNER);
-    require(_to != address(0), ZERO_ADDRESS);
-
-    _transfer(_to, _tokenId);
-
-    if (_to.isContract()) {
-      bytes4 retval = ERC721TokenReceiver(_to).onERC721Received(msg.sender, _from, _tokenId, _data);
-      require(retval == MAGIC_ON_ERC721_RECEIVED, NOT_ABLE_TO_RECEIVE_NFT);
-    }
-  }
-
   function _clearApproval(uint256 _tokenId) private {
     delete idToApproval[_tokenId];
-  }
-}
-contract NFTokenMetadata is NFToken, ERC721Metadata {
-  string internal nftName;
-  string internal nftSymbol;
-  mapping(uint256 => string) internal idToUri;
-
-  constructor() {
-    supportedInterfaces[0x5b5e139f] = true;
-  }
-
-  function name() external override view returns (string memory _name) {
-    _name = nftName;
-  }
-
-  function symbol() external override view returns (string memory _symbol) {
-    _symbol = nftSymbol;
-  }
-
-  function tokenURI(uint256 _tokenId) external override view validNFToken(_tokenId) returns (string memory) {
-    return _tokenURI(_tokenId);
-  }
-
-  function _tokenURI(uint256 _tokenId) internal virtual view returns (string memory) {
-    return idToUri[_tokenId];
-  }
-
-  function _burn(uint256 _tokenId) internal virtual override {
-    super._burn(_tokenId);
-    delete idToUri[_tokenId];
-  }
-
-  function _setTokenUri(uint256 _tokenId, string memory _uri) internal validNFToken(_tokenId) {
-    idToUri[_tokenId] = _uri;
   }
 }
 
@@ -280,6 +272,7 @@ abstract contract Context {
     return msg.data;
   }
 }
+
 contract Ownable is Context {
   address private _owner;
 
@@ -306,6 +299,7 @@ contract Ownable is Context {
     _owner = newOwner;
   }
 }
+
 contract Authorizable is Ownable {
   mapping(address => bool) private authorized;
 
@@ -327,7 +321,7 @@ contract Authorizable is Ownable {
   }
 }
 
-contract NFT_ERC_721 is NFTokenMetadata, Authorizable {
+contract NFT_ERC_721 is NFToken, Authorizable {
 
   uint256 nextTokenId = 1;
 
