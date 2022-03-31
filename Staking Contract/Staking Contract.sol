@@ -20,6 +20,21 @@ interface IERC20 {
     event Approval(address indexed owner, address indexed spender, uint256 value);
 }
 
+interface NFTContract {
+    function minter() external view returns (address);
+
+    function mint(
+        address _to,
+        IERC20 stakeToken,
+        IERC20 rewardToken,
+        uint256 poolIndex
+    ) external returns (uint256 tokenId);
+
+    function getTokenIdsOfOwner(IERC20 stakeToken, IERC20 rewardToken, uint256 poolIndex, address _owner) external view returns (uint256[] memory);
+
+    function ownerOf(uint256 _tokenId) external view returns (address);
+}
+
 library SafeMath {
     function add(uint256 a, uint256 b) internal pure returns (uint256) {
         uint256 c = a + b;
@@ -211,9 +226,9 @@ contract StakingContract is Ownable {
         uint256 poolIndex;
     }
 
-    struct UserInfo {
-        uint256 amount;                         // How many LP tokens the user has provided.
-        uint256 subtractableReward;             // Reward debt. See explanation below.
+    struct TokenInfo {
+        uint256 amount;                         // How many stakeToken the token has provided.
+        uint256 subtractableReward;
         uint256 depositStamp;
     }
 
@@ -241,8 +256,11 @@ contract StakingContract is Ownable {
         uint256 endBlock;                       // Block number when reward distribution ends
         uint256 maxStakers;
         uint256 totalStakers;
-        mapping(address => UserInfo) userInfo;  // Info of each user that stakes with the pool
+        mapping(uint256 => TokenInfo) tokenInfo;  // Info of each token that stakes with the pool
     }
+
+    bool public hasSetNFTContract = false;
+    NFTContract public nftContract = NFTContract(address(0));
 
     IERC20 public accessToken = IERC20(address(0));
     uint256 public minAccessTokenRequired = 0;
@@ -267,10 +285,10 @@ contract StakingContract is Ownable {
     mapping(IERC20 => mapping(IERC20 => mapping(uint256 => BasicPoolInfo))) public allPoolsBasicInfo;
     mapping(IERC20 => mapping(IERC20 => mapping(uint256 => DetailedPoolInfo))) public allPoolsDetailedInfo;
 
-    event Deposit(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
-    event Withdraw(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
-    event ReceivedReward(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
-    event EmergencyWithdraw(address indexed user, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
+    event Deposit(uint256 indexed token, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
+    event Withdraw(uint256 indexed token, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
+    event ReceivedReward(address indexed receiver, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
+    event EmergencyWithdraw(uint256 indexed token, IERC20 indexed stakeToken, IERC20 indexed rewardToken, uint256 poolIndex, uint256 amount);
 
     constructor() {
         treasury = payable(msg.sender);
@@ -288,6 +306,14 @@ contract StakingContract is Ownable {
         }));
     }
 
+    function setNFTContract(NFTContract _nftContract) external onlyOwner() {
+        require(!hasSetNFTContract, "NFT Contract has already been set.");
+        require(_nftContract.minter() == address(this), "Invalid Minter.");
+
+        nftContract = _nftContract;
+        hasSetNFTContract = true;
+    }
+
     function currentBlock() external view returns (uint256) {
         return block.number;
     }
@@ -300,17 +326,21 @@ contract StakingContract is Ownable {
         return endedPools.length - 1;
     }
 
-    // View function to see LP amount staked by a user.
-    function getUserStakedAmount(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, address _user) external view returns (uint256) {
+    // View function to see LP amount staked by a NFT.
+    function getNFTStakedAmount(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _token) external view returns (uint256) {
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
-        return detailedPoolInfo.userInfo[_user].amount;
+        return detailedPoolInfo.tokenInfo[_token].amount;
     }
 
-    // View function to see pending rewards of a user.
-    function getPendingRewardsOfUser(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, address _user) public view returns (uint256) {
+    function getNFTInfo(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _token) external view returns (TokenInfo memory) {
+        return allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex].tokenInfo[_token];
+    }
+
+    // View function to see pending rewards of a token.
+    function getPendingRewardsOfNFT(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _token) public view returns (uint256) {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
-        UserInfo storage user = detailedPoolInfo.userInfo[_user];
+        TokenInfo storage token = detailedPoolInfo.tokenInfo[_token];
 
         uint256 accRewardPerTokenStaked = detailedPoolInfo.accRewardPerTokenStaked;
         uint256 tokensStaked = detailedPoolInfo.tokensStaked;
@@ -322,7 +352,7 @@ contract StakingContract is Ownable {
             accRewardPerTokenStaked = accRewardPerTokenStaked.add(newRewards.mul(1e36).div(tokensStaked));
         }
 
-        return user.amount.mul(accRewardPerTokenStaked).div(1e36).sub(user.subtractableReward);
+        return token.amount.mul(accRewardPerTokenStaked).div(1e36).sub(token.subtractableReward);
     }
 
     // View function for total reward the farm has yet to pay out.
@@ -370,6 +400,8 @@ contract StakingContract is Ownable {
         uint256 _maxStake,
         uint256 _maxStakers
     ) public onlyOwner returns (uint256) {
+        require(hasSetNFTContract, "NFT Contract not set yet.");
+
         if (latestPoolNumber[_stakeToken][_rewardToken] < 1) {
             latestPoolNumber[_stakeToken][_rewardToken] = 1;
         }
@@ -382,7 +414,7 @@ contract StakingContract is Ownable {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
 
-        require(!basicPoolInfo.doesExists, "This pool already exists.");
+        require(!basicPoolInfo.doesExists, "Pool already exists.");
         massUpdatePoolStatus();
 
         basicPoolInfo.doesExists = true;
@@ -448,11 +480,16 @@ contract StakingContract is Ownable {
         detailedPoolInfo.endBlock += trueDepositedTokens.div(basicPoolInfo.rewardPerBlock);
     }
 
+    function getStakingNFTOfUser(address _owner, IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex) internal returns (uint256) {
+        uint256[] memory tokenIds = nftContract.getTokenIdsOfOwner(_stakeToken, _rewardToken, latestPoolNumber[_stakeToken][_rewardToken], _owner);
+        return (tokenIds.length > 0) ? tokenIds[0] : nftContract.mint(_owner, _stakeToken, _rewardToken, poolIndex);
+    }
+
     // Deposit staking tokens to pool.
     function stakeWithPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount) external payable {
-        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
-        DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
-        UserInfo storage user = detailedPoolInfo.userInfo[msg.sender];
+        uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
+        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
+        DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
 
         require(basicPoolInfo.doesExists, "stakeWithPool: No such pool exists.");
         require(!basicPoolInfo.hasEnded, "stakeWithPool: Pool has already ended.");
@@ -460,19 +497,22 @@ contract StakingContract is Ownable {
         require(block.number >= basicPoolInfo.startBlock, "stakeWithPool: Pool reward distribution has not been started yet.");
         require(detailedPoolInfo.totalStakers < detailedPoolInfo.maxStakers, "Max stakers reached!");
         require(msg.value >= basicPoolInfo.gasAmount, "Insufficient Value for the trx.");
-        require((_amount.add(user.amount) >= basicPoolInfo.minStake) && (_amount.add(user.amount) <= basicPoolInfo.maxStake), "Stake amount out of range.");
+
+        uint256 tokenId = getStakingNFTOfUser(msg.sender, _stakeToken, _rewardToken, poolIndex);
+        TokenInfo storage token = detailedPoolInfo.tokenInfo[tokenId];
+        require((_amount.add(token.amount) >= basicPoolInfo.minStake) && (_amount.add(token.amount) <= basicPoolInfo.maxStake), "Stake amount out of range.");
 
         if (requireAccessToken) {
             require(accessToken.balanceOf(msg.sender) >= minAccessTokenRequired, "Insufficient access token held by staker");
         }
 
         massUpdatePoolStatus();
-        updatePoolStatus(_stakeToken, _rewardToken, latestPoolNumber[_stakeToken][_rewardToken]);
+        updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
 
-        if (user.amount > 0) {
-            uint256 pendingAmount = getPendingRewardsOfUser(_stakeToken, _rewardToken, latestPoolNumber[_stakeToken][_rewardToken], msg.sender);
+        if (token.amount > 0) {
+            uint256 pendingAmount = getPendingRewardsOfNFT(_stakeToken, _rewardToken, poolIndex, tokenId);
             if (pendingAmount > 0) {
-                erc20RewardTransfer(msg.sender, _stakeToken, _rewardToken, latestPoolNumber[_stakeToken][_rewardToken], pendingAmount);
+                erc20RewardTransfer(msg.sender, _stakeToken, _rewardToken, poolIndex, pendingAmount);
             }
         }
 
@@ -484,35 +524,43 @@ contract StakingContract is Ownable {
         withdrawableFee[_stakeToken] += depositFee;
         trueDepositedTokens = trueDepositedTokens.sub(depositFee);
 
-        user.amount = user.amount.add(trueDepositedTokens);
+        token.amount = token.amount.add(trueDepositedTokens);
         detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.add(trueDepositedTokens);
-        user.subtractableReward = user.amount.mul(detailedPoolInfo.accRewardPerTokenStaked).div(1e36);
+        token.subtractableReward = token.amount.mul(detailedPoolInfo.accRewardPerTokenStaked).div(1e36);
 
-        if (user.depositStamp <= 0) {
-            user.depositStamp = block.number;
+        if (token.depositStamp <= 0) {
+            token.depositStamp = block.number;
         }
 
         treasury.transfer(msg.value);
 
         detailedPoolInfo.totalStakers = detailedPoolInfo.totalStakers.add(1);
 
-        emit Deposit(msg.sender, _stakeToken, _rewardToken, latestPoolNumber[_stakeToken][_rewardToken], _amount);
+        emit Deposit(tokenId, _stakeToken, _rewardToken, poolIndex, _amount);
     }
 
     // Withdraw staking tokens from pool.
     function unstakeFromPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _amount) public payable {
+        uint256[] memory tokenIds = nftContract.getTokenIdsOfOwner(_stakeToken, _rewardToken, poolIndex, msg.sender);
+        require(tokenIds.length > 0, "No Staking Positions NFT held by the caller.");
+        unstakeFromPool(_stakeToken, _rewardToken, poolIndex, _amount, tokenIds[0]);
+    }
+
+    function unstakeFromPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _amount, uint256 tokenId) public payable {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
-        UserInfo storage user = detailedPoolInfo.userInfo[msg.sender];
+
+        require(nftContract.ownerOf(tokenId) == msg.sender, "Sender not owner of the NFT.");
+        TokenInfo storage token = detailedPoolInfo.tokenInfo[tokenId];
 
         require(basicPoolInfo.doesExists, "unstakeFromPool: No such pool exists.");
-        require(user.amount >= _amount, "unstakeFromPool: Can't withdraw more than deposited amount.");
-        require(user.depositStamp.add(basicPoolInfo.lockPeriod) <= block.number, "unstakeFromPool: Lock period not fulfilled");
+        require(token.amount >= _amount, "unstakeFromPool: Can't withdraw more than deposited amount.");
+        require(token.depositStamp.add(basicPoolInfo.lockPeriod) <= block.number, "unstakeFromPool: Lock period not fulfilled");
 
         massUpdatePoolStatus();
         updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
 
-        uint256 pendingAmount = getPendingRewardsOfUser(_stakeToken, _rewardToken, poolIndex, msg.sender);
+        uint256 pendingAmount = getPendingRewardsOfNFT(_stakeToken, _rewardToken, poolIndex, tokenId);
         if (pendingAmount > 0) {
             erc20RewardTransfer(msg.sender, _stakeToken, _rewardToken, poolIndex, pendingAmount);
         }
@@ -525,16 +573,16 @@ contract StakingContract is Ownable {
 
             basicPoolInfo.stakeToken.safeTransfer(address(msg.sender), _amount.sub(withdrawFee));
             detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.sub(_amount);
-            user.amount = user.amount.sub(_amount);
+            token.amount = token.amount.sub(_amount);
 
-            if (user.amount <= 0) {
+            if (token.amount <= 0) {
                 detailedPoolInfo.totalStakers = detailedPoolInfo.totalStakers.sub(1);
             }
 
-            emit Withdraw(msg.sender, _stakeToken, _rewardToken, poolIndex, _amount);
+            emit Withdraw(tokenId, _stakeToken, _rewardToken, poolIndex, _amount);
         }
 
-        user.subtractableReward = user.amount.mul(detailedPoolInfo.accRewardPerTokenStaked).div(1e36);
+        token.subtractableReward = token.amount.mul(detailedPoolInfo.accRewardPerTokenStaked).div(1e36);
 
         if (msg.value > 0) {
             treasury.transfer(msg.value);
@@ -543,20 +591,28 @@ contract StakingContract is Ownable {
 
     // Withdraw without caring about rewards and lock period. EMERGENCY ONLY.
     function emergencyWithdraw(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex) public {
+        uint256[] memory tokenIds = nftContract.getTokenIdsOfOwner(_stakeToken, _rewardToken, poolIndex, msg.sender);
+        require(tokenIds.length > 0, "No Staking Positions NFT held by the caller.");
+        emergencyWithdraw(_stakeToken, _rewardToken, poolIndex, tokenIds[0]);
+    }
+
+    function emergencyWithdraw(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 tokenId) public {
         massUpdatePoolStatus();
 
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
-        UserInfo storage user = detailedPoolInfo.userInfo[msg.sender];
 
-        if (user.amount > 0) {
-            basicPoolInfo.stakeToken.safeTransfer(address(msg.sender), user.amount);
-            detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.sub(user.amount);
-            user.amount = 0;
-            user.subtractableReward = 0;
+        require(nftContract.ownerOf(tokenId) == msg.sender, "Sender not owner of the NFT.");
+        TokenInfo storage token = detailedPoolInfo.tokenInfo[tokenId];
+
+        if (token.amount > 0) {
+            basicPoolInfo.stakeToken.safeTransfer(address(msg.sender), token.amount);
+            detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.sub(token.amount);
+            token.amount = 0;
+            token.subtractableReward = 0;
             detailedPoolInfo.totalStakers = detailedPoolInfo.totalStakers.sub(1);
 
-            emit EmergencyWithdraw(msg.sender, _stakeToken, _rewardToken, poolIndex, user.amount);
+            emit EmergencyWithdraw(tokenId, _stakeToken, _rewardToken, poolIndex, token.amount);
         }
     }
 
@@ -622,7 +678,7 @@ contract StakingContract is Ownable {
         }
     }
 
-    // Change no. of users that can stake with in a pool
+    // Change no. of tokens that can stake with in a pool
     function changePoolMaxStakers(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _maxStakers) public onlyOwner {
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
