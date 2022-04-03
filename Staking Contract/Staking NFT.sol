@@ -13,18 +13,6 @@ library AddressUtils {
 }
 
 library StringTools {
-    function appendString(string memory a, string memory b) internal pure returns (string memory) {
-        return appendString(a, b, "");
-    }
-
-    function appendString(string memory a, string memory b, string memory c) internal pure returns (string memory) {
-        return appendString(a, b, c, "");
-    }
-
-    function appendString(string memory a, string memory b, string memory c, string memory d) internal pure returns (string memory) {
-        return string(abi.encodePacked(a, b, c, d));
-    }
-
     function toString(uint value) internal pure returns (string memory) {
         if (value == 0) {return "0";}
 
@@ -379,9 +367,43 @@ contract NFT_ERC_721 is NFToken, Ownable {
         uint256 poolIndex;
     }
 
+    mapping(address => uint256[]) allTokenIdsOfUser;
     mapping(uint256 => uint256) public tokenIdToIndex;
+    mapping(uint256 => uint256) public tokenIdToAllIndex;
     mapping(uint256 => PoolIdentifier) public tokenIdToPoolIdentifier;
     mapping(IERC20 => mapping(IERC20 => mapping(uint256 => mapping(address => uint256[])))) public poolTypeAndOwnerToTokenId;
+
+    constructor(string memory name, string memory symbol, address _minter, string memory _imageUrl) {
+        supportedInterfaces[0x5b5e139f] = true;
+        nftName = name;
+        nftSymbol = symbol;
+        minter = _minter;
+        imageUrl = _imageUrl;
+    }
+
+    modifier onlyMinter() {
+        require(_msgSender() == minter, "Operation can only be performed by the minter.");
+        _;
+    }
+
+    function addIdToAllIdList(address to, uint256 _tokenId) internal {
+        tokenIdToAllIndex[_tokenId] = allTokenIdsOfUser[to].length;
+        allTokenIdsOfUser[to].push(_tokenId);
+    }
+
+    function delIdFromAllIdList(address from, uint256 _tokenId) internal {
+        uint256 length = allTokenIdsOfUser[from].length;
+        require(length > 0, "Invalid Length");
+
+        uint256 lastId = allTokenIdsOfUser[from][length - 1];
+        uint256 currentIndex = tokenIdToAllIndex[_tokenId];
+
+        allTokenIdsOfUser[from][currentIndex] = allTokenIdsOfUser[from][length - 1];
+        tokenIdToAllIndex[lastId] = currentIndex;
+        allTokenIdsOfUser[from].pop();
+
+        delete tokenIdToAllIndex[_tokenId];
+    }
 
     function _transferFrom(address _from, address _to, uint256 _tokenId) internal override {
         super._transferFrom(_from, _to, _tokenId);
@@ -402,14 +424,50 @@ contract NFT_ERC_721 is NFToken, Ownable {
 
         poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_to].push(_tokenId);
         tokenIdToIndex[_tokenId] = poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_to].length - 1;
+
+        delIdFromAllIdList(_from, _tokenId);
+        addIdToAllIdList(_to, nextTokenId);
     }
 
-    constructor(string memory name, string memory symbol, address _minter, string memory _imageUrl) {
-        supportedInterfaces[0x5b5e139f] = true;
-        nftName = name;
-        nftSymbol = symbol;
-        minter = _minter;
-        imageUrl = _imageUrl;
+    function mint(
+        address _to,
+        IERC20 stakeToken,
+        IERC20 rewardToken,
+        uint256 poolIndex
+    ) external onlyMinter() returns (uint256 tokenId) {
+        _mint(_to, nextTokenId);
+
+        PoolIdentifier storage poolIdentifier = tokenIdToPoolIdentifier[nextTokenId];
+        poolIdentifier.stakeToken = stakeToken;
+        poolIdentifier.rewardToken = rewardToken;
+        poolIdentifier.poolIndex = poolIndex;
+
+        tokenIdToIndex[nextTokenId] = poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_to].length;
+        poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_to].push(nextTokenId);
+        addIdToAllIdList(_to, nextTokenId);
+
+        tokenId = nextTokenId;
+        nextTokenId += 1;
+    }
+
+    function burn(address _from, uint256 _tokenId) external onlyMinter() {
+        require(_from == idToOwner[_tokenId], "Invalid _from specified.");
+        _burn(_tokenId);
+
+        PoolIdentifier storage poolIdentifier = tokenIdToPoolIdentifier[_tokenId];
+        IERC20 stakeToken = poolIdentifier.stakeToken;
+        IERC20 rewardToken = poolIdentifier.rewardToken;
+        uint256 poolIndex = poolIdentifier.poolIndex;
+
+        uint256 tokenIndex = tokenIdToIndex[_tokenId];
+        uint256 length = poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_from].length;
+        uint256 endingToken = poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_from][length - 1];
+
+        poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_from][tokenIndex] = endingToken;
+        tokenIdToIndex[endingToken] = tokenIndex;
+        poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_from].pop();
+
+        delIdFromAllIdList(_from, _tokenId);
     }
 
     function setTokenName(string calldata name) external onlyOwner() {
@@ -428,10 +486,15 @@ contract NFT_ERC_721 is NFToken, Ownable {
         PoolIdentifier storage poolIdentifier = tokenIdToPoolIdentifier[_tokenId];
 
         return (
-        address(poolIdentifier.stakeToken).toString(),
-        address(poolIdentifier.rewardToken).toString(),
-        poolIdentifier.poolIndex.toString()
+			address(poolIdentifier.stakeToken).toString(),
+			address(poolIdentifier.rewardToken).toString(),
+			poolIdentifier.poolIndex.toString()
         );
+    }
+
+    function getTokenParameters(uint256 _tokenId) external view validNFToken(_tokenId) returns(IERC20, IERC20, uint256) {
+        PoolIdentifier storage poolIdentifier = tokenIdToPoolIdentifier[_tokenId];
+        return (poolIdentifier.stakeToken, poolIdentifier.rewardToken, poolIdentifier.poolIndex);
     }
 
     function tokenURI(uint256 _tokenId) external override view validNFToken(_tokenId) returns (string memory) {
@@ -460,32 +523,11 @@ contract NFT_ERC_721 is NFToken, Ownable {
         return uri;
     }
 
-    modifier onlyMinter() {
-        require(_msgSender() == minter, "Operation can only be performed by the minter.");
-        _;
-    }
-
-    function mint(
-        address _to,
-        IERC20 stakeToken,
-        IERC20 rewardToken,
-        uint256 poolIndex
-    ) external onlyMinter() returns (uint256 tokenId) {
-        _mint(_to, nextTokenId);
-
-        PoolIdentifier storage poolIdentifier = tokenIdToPoolIdentifier[nextTokenId];
-        poolIdentifier.stakeToken = stakeToken;
-        poolIdentifier.rewardToken = rewardToken;
-        poolIdentifier.poolIndex = poolIndex;
-
-        tokenIdToIndex[nextTokenId] = poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_to].length;
-        poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_to].push(nextTokenId);
-
-        tokenId = nextTokenId;
-        nextTokenId += 1;
-    }
-
     function getTokenIdsOfOwner(IERC20 stakeToken, IERC20 rewardToken, uint256 poolIndex, address _owner) external view returns (uint256[] memory) {
         return poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_owner];
+    }
+
+    function getAllTokenIdsOfOwner(address _owner) external view returns(uint256[] memory) {
+        return allTokenIdsOfUser[_owner];
     }
 }
