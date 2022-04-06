@@ -985,46 +985,48 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         uint256 _minimumTokenBalanceForDividends
     ) ERC20(_tokenName, _tokenSymbol, _decimals) {
         // Week 0
-        weeklyFee.push(FeeSet(12, 15, 3));
+        weeklyFee.push(FeeSet(120, 150, 30));
         // Week 1
-        weeklyFee.push(FeeSet(12, 14, 3));
+        weeklyFee.push(FeeSet(120, 140, 30));
         // Week 2
-        weeklyFee.push(FeeSet(12, 13, 3));
+        weeklyFee.push(FeeSet(120, 130, 30));
         // Week 3
-        weeklyFee.push(FeeSet(11, 13, 3));
+        weeklyFee.push(FeeSet(110, 130, 30));
         // Week 4
-        weeklyFee.push(FeeSet(10, 13, 3));
+        weeklyFee.push(FeeSet(100, 130, 30));
         // Week 5
-        weeklyFee.push(FeeSet(10, 12, 3));
+        weeklyFee.push(FeeSet(100, 120, 30));
         // Week 6
-        weeklyFee.push(FeeSet(10, 12, 2));
+        weeklyFee.push(FeeSet(100, 120, 20));
         // Week 7
-        weeklyFee.push(FeeSet(10, 11, 2));
+        weeklyFee.push(FeeSet(100, 110, 20));
         // Week 8
-        weeklyFee.push(FeeSet(9, 11, 2));
+        weeklyFee.push(FeeSet(90, 110, 20));
         // Week 9
-        weeklyFee.push(FeeSet(9, 10, 2));
+        weeklyFee.push(FeeSet(90, 100, 20));
         // Week 10
-        weeklyFee.push(FeeSet(8, 10, 2));
+        weeklyFee.push(FeeSet(80, 100, 20));
         // Week 11
-        weeklyFee.push(FeeSet(7, 10, 2));
+        weeklyFee.push(FeeSet(70, 100, 20));
         // Week 12
-        weeklyFee.push(FeeSet(7, 9, 2));
+        weeklyFee.push(FeeSet(70, 90, 20));
         // Week 13
-        weeklyFee.push(FeeSet(7, 9, 1));
+        weeklyFee.push(FeeSet(70, 90, 10));
         // Week 14
-        weeklyFee.push(FeeSet(7, 8, 1));
+        weeklyFee.push(FeeSet(70, 80, 10));
         // Week 15
-        weeklyFee.push(FeeSet(6, 7, 1));
+        weeklyFee.push(FeeSet(60, 70, 10));
         // Week 16
-        weeklyFee.push(FeeSet(5, 7, 1));
+        weeklyFee.push(FeeSet(50, 70, 10));
         // Week 17
-        weeklyFee.push(FeeSet(5, 6, 1));
+        weeklyFee.push(FeeSet(50, 60, 10));
         // Week 18
-        weeklyFee.push(FeeSet(4, 6, 1));
+        weeklyFee.push(FeeSet(40, 60, 10));
         // Week 19
-        weeklyFee.push(FeeSet(4, 5, 1));
+        weeklyFee.push(FeeSet(40, 50, 10));
 
+        buyFee = FeeSet(15, 25, 10);
+        
         dividendTracker = new DividendTracker(_tokenSymbol.appendString("-DT"), decimals(), _minimumTokenBalanceForDividends);
 
         uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
@@ -1082,7 +1084,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         buyFee.liquidityFee = liquidityFee;
 
         uint256 total = burnFee + holderFee + liquidityFee;
-        require((total >= 0) && (total <= 5), "Invalid total buy fee.");
+        require((total >= 0) && (total <= 50), "Invalid total buy fee.");
     }
 
     function setWeeklyFees(uint256 weekNumber, uint256 burnFee, uint256 holderFee, uint256 liquidityFee) external onlyOwner() {
@@ -1093,7 +1095,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         weeklyFee[weekNumber].liquidityFee = liquidityFee;
 
         uint256 total = burnFee + holderFee + liquidityFee;
-        require((total >= 0) && (total <= 30), "Invalid total week fee.");
+        require((total >= 0) && (total <= 300), "Invalid total week fee.");
     }
     
     function recoverLostCoins(address coinAddress, address receiveWallet, uint256 amount) external onlyOwner() {
@@ -1169,9 +1171,9 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
                 emit FeeChargedAfterHoldingFor(from, holdWeeks, effectiveObtainTime[from], block.timestamp);
             }
 
-            uint256 burnFees = amount.mul(currentFeeSet.burnFee).div(100);
-            uint256 liquidityFees = amount.mul(currentFeeSet.liquidityFee).div(100);
-            uint256 holderFees = amount.mul(currentFeeSet.holderFee).div(100);
+            uint256 burnFees = amount.mul(currentFeeSet.burnFee).div(1000);
+            uint256 liquidityFees = amount.mul(currentFeeSet.liquidityFee).div(1000);
+            uint256 holderFees = amount.mul(currentFeeSet.holderFee).div(1000);
 
             availableHolderFee = availableHolderFee.add(holderFees);
             availableLiquidityFee = availableLiquidityFee.add(liquidityFees);
