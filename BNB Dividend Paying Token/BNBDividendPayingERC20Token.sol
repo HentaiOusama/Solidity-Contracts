@@ -700,7 +700,7 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
         if (_withdrawableDividend > 0) {
             withdrawnDividends[user] = withdrawnDividends[user].add(_withdrawableDividend);
             emit DividendWithdrawn(user, _withdrawableDividend);
-            (bool success,) = user.call{value : _withdrawableDividend, gas : 3000}("");
+            (bool success,) = user.call{value : _withdrawableDividend, gas : 5000}("");
 
             if (!success) {
                 withdrawnDividends[user] = withdrawnDividends[user].sub(_withdrawableDividend);
@@ -929,6 +929,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
     }
 
     FeeSet[] public weeklyFee;
+    FeeSet public buyFee;
     uint256 immutable oneWeek = 7 * 24 * 60 * 60;
     mapping(address => bool) private _isExcludedFromFees;
     mapping(address => uint256) public effectiveObtainTime;
@@ -1047,15 +1048,19 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
     receive() external payable {
     }
 
+    function isExcludedFromFees(address account) public view returns (bool) {
+        return _isExcludedFromFees[account];
+    }
+
+    function getNumOfWeeksTokenHeldFor(address _address) public view returns(uint256) {
+        return ((block.timestamp).sub(effectiveObtainTime[_address])).div(oneWeek);
+    }
+
     function excludeFromFees(address account, bool excluded) public onlyOwner {
         require(_isExcludedFromFees[account] != excluded, "Account is already excluded");
         _isExcludedFromFees[account] = excluded;
 
         emit ExcludeFromFees(account, excluded);
-    }
-
-    function isExcludedFromFees(address account) public view returns (bool) {
-        return _isExcludedFromFees[account];
     }
 
     function setIsSwappingEnabled(bool shouldEnable) external onlyOwner() {
@@ -1071,12 +1076,28 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         swapTokensAtAmount = _swapTokensAtAmount;
     }
 
-    function getNumOfWeeksTokenHeldFor(address _address) public view returns(uint256) {
-        return ((block.timestamp).sub(effectiveObtainTime[_address])).div(oneWeek);
+    function setBuyFees(uint256 burnFee, uint256 holderFee, uint256 liquidityFee) external onlyOwner() {
+        buyFee.burnFee = burnFee;
+        buyFee.holderFee = holderFee;
+        buyFee.liquidityFee = liquidityFee;
+
+        uint256 total = burnFee + holderFee + liquidityFee;
+        require((total >= 0) && (total <= 5), "Invalid total buy fee.");
+    }
+
+    function setWeeklyFees(uint256 weekNumber, uint256 burnFee, uint256 holderFee, uint256 liquidityFee) external onlyOwner() {
+        require(weekNumber < weeklyFee.length, "Invalid weekNumber");
+
+        weeklyFee[weekNumber].burnFee = burnFee;
+        weeklyFee[weekNumber].holderFee = holderFee;
+        weeklyFee[weekNumber].liquidityFee = liquidityFee;
+
+        uint256 total = burnFee + holderFee + liquidityFee;
+        require((total >= 0) && (total <= 30), "Invalid total week fee.");
     }
     
     function recoverLostCoins(address coinAddress, address receiveWallet, uint256 amount) external onlyOwner() {
-        require(coinAddress != address(this), "Cannot recover ABBY");
+        require(coinAddress != address(this), "Cannot recover self");
         IERC20(coinAddress).transfer(receiveWallet, amount);
     }
 
@@ -1132,14 +1153,21 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
             swapping = false;
         }
 
-        bool takeFee = !(swapping || _isExcludedFromFees[from] || _isExcludedFromFees[to] || automatedMarketMakerPairs[from] || !isTradingEnabled);
+        bool takeFee = !(swapping || _isExcludedFromFees[from] || _isExcludedFromFees[to] || !isTradingEnabled);
 
         if (takeFee) {
-            uint256 holdWeeks = ((block.timestamp).sub(effectiveObtainTime[from])).div(oneWeek);
-            if (holdWeeks >= weeklyFee.length) {
-                holdWeeks = weeklyFee.length - 1;
+            FeeSet storage currentFeeSet;
+
+            if (automatedMarketMakerPairs[from]) {
+                currentFeeSet = buyFee;
+            } else {
+                uint256 holdWeeks = ((block.timestamp).sub(effectiveObtainTime[from])).div(oneWeek);
+                if (holdWeeks >= weeklyFee.length) {
+                    holdWeeks = weeklyFee.length - 1;
+                }
+                currentFeeSet = weeklyFee[holdWeeks];
+                emit FeeChargedAfterHoldingFor(from, holdWeeks, effectiveObtainTime[from], block.timestamp);
             }
-            FeeSet storage currentFeeSet = weeklyFee[holdWeeks];
 
             uint256 burnFees = amount.mul(currentFeeSet.burnFee).div(100);
             uint256 liquidityFees = amount.mul(currentFeeSet.liquidityFee).div(100);
@@ -1151,8 +1179,6 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
             amount = ((amount.sub(burnFees)).sub(liquidityFees)).sub(holderFees);
             _burn(from, burnFees);
             subTransfer(from, address(this), liquidityFees.add(holderFees));
-
-            emit FeeChargedAfterHoldingFor(from, holdWeeks, effectiveObtainTime[from], block.timestamp);
         }
         subTransfer(from, to, amount);
 
