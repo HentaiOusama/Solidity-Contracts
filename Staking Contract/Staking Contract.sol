@@ -241,6 +241,7 @@ contract StakingContract is Ownable {
         bool hasEnded;
         IERC20 stakeToken;
         IERC20 rewardToken;
+        address poolCreator;
         uint256 createBlock;                    // Block number when the pool was created
         uint256 startBlock;                     // Block number when reward distribution start
         uint256 rewardPerBlock;
@@ -399,6 +400,7 @@ contract StakingContract is Ownable {
     function createNewStakingPool(
         IERC20 _stakeToken,
         IERC20 _rewardToken,
+        address _poolCreator,
         uint256 _rewardPerBlock,
         uint256 _minStake,
         uint256 _maxStake,
@@ -424,6 +426,7 @@ contract StakingContract is Ownable {
         basicPoolInfo.doesExists = true;
         basicPoolInfo.stakeToken = _stakeToken;
         basicPoolInfo.rewardToken = _rewardToken;
+        basicPoolInfo.poolCreator = _poolCreator;
         basicPoolInfo.createBlock = block.number;
         basicPoolInfo.rewardPerBlock = _rewardPerBlock;
         basicPoolInfo.gasAmount = gasAmount;
@@ -441,11 +444,22 @@ contract StakingContract is Ownable {
 
     // Fund the pool, consequently setting the end block
     function performInitialFunding(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount, uint256 _startBlock, uint256 _lockBlocks) public {
-        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
-        DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][latestPoolNumber[_stakeToken][_rewardToken]];
+        uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
+        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
+        DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
 
         require(basicPoolInfo.doesExists, "performInitialFunding: No such pool exists.");
         require(basicPoolInfo.startBlock == 0, "performInitialFunding: Initial funding already complete");
+        require(msg.sender == basicPoolInfo.poolCreator, "performInitialFunding: Pool can only be funded by the pool creator");
+
+        // If pool has passed max fund time, it will be ended before funding can be done.
+        // Otherwise, nothing will happen based on how the updatePoolStatus function is designed.
+        updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
+        if(basicPoolInfo.hasEnded) {
+            return;
+        }
+
+        // This check ensures that caller does not set start block to be too high w.r.t. current block.
         require(_startBlock <= block.number.add(staleBlockDuration), "performInitialFunding: Start Block cannot be more than staleBlockDuration from current block.");
 
         IERC20 erc20 = basicPoolInfo.rewardToken;
@@ -496,7 +510,12 @@ contract StakingContract is Ownable {
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
 
         require(basicPoolInfo.doesExists, "stakeWithPool: No such pool exists.");
-        require(!basicPoolInfo.hasEnded, "stakeWithPool: Pool has already ended.");
+        updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
+
+        if (basicPoolInfo.hasEnded) {
+            massUpdatePoolStatus();
+            return 0;
+        }
         require(basicPoolInfo.startBlock > 0, "stakeWithPool: Pool has not been funded yet.");
         require(block.number >= basicPoolInfo.startBlock, "stakeWithPool: Pool reward distribution has not been started yet.");
         require(detailedPoolInfo.totalStakers < detailedPoolInfo.maxStakers, "Max stakers reached!");
@@ -511,7 +530,6 @@ contract StakingContract is Ownable {
         }
 
         massUpdatePoolStatus();
-        updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
 
         if (token.amount > 0) {
             uint256 pendingAmount = getPendingRewardsOfNFT(_stakeToken, _rewardToken, poolIndex, tokenId);
@@ -671,11 +689,14 @@ contract StakingContract is Ownable {
     }
 
     function massUpdatePoolStatus() public {
+        uint256 rotateCount = 0;
         for (uint256 i = 0; i < massUpdatePoolCount; i++) {
-            if (activePools.length < 2) {
+            if (activePools.length < 2 || rotateCount >= 2) {
                 return;
             }
+            
             if (currentPoolToBeUpdated < 1 || currentPoolToBeUpdated >= activePools.length) {
+                rotateCount += 1;
                 currentPoolToBeUpdated = 1;
             }
 
@@ -751,8 +772,8 @@ contract StakingContract is Ownable {
         treasury = newTreasury;
     }
 
-    function transfer() public onlyOwner {
-        treasury.transfer(address(this).balance);
+    function transfer() public onlyOwner returns (bool success) {
+        (success, ) = treasury.call{value: address(this).balance}("");
     }
 
     function withdrawFees(IERC20 withdrawToken, address _to, uint256 _amount) external onlyOwner {

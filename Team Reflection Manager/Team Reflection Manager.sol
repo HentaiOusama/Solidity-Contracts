@@ -117,8 +117,10 @@ contract Ownable is Context {
   }
 }
 
-contract DividendHolderAndDistributor is Ownable {
+contract TeamReflectionManager is Ownable {
   using SafeMath for uint256;
+
+  bool public canInitialize = true;
 
   DividendPayingToken public holdCoin;
   bool isCoinWithdrawalEnabled = false;
@@ -133,7 +135,19 @@ contract DividendHolderAndDistributor is Ownable {
   uint256 public totalBNBAccumulated = 1;
   uint256 public totalCoinsPresent = 0;
 
-  constructor(address holdCoinAddress, address[] memory _addresses, uint256[] memory _amounts) {
+  constructor() {}
+
+  receive() external payable {
+    totalBNBAccumulated = totalBNBAccumulated.add(msg.value);
+  }
+
+  function hasSystemStarted() public view returns(bool) {
+    return ((holdCoin.balanceOf(address(this)) >= totalCoinsPresent) && !canInitialize);
+  }
+
+  function initializeContract(address holdCoinAddress, address[] memory _addresses, uint256[] memory _amounts) external onlyOwner() {
+    require(canInitialize, "Contract already initiated");
+
     holdCoin = DividendPayingToken(holdCoinAddress);
     require(_addresses.length == _amounts.length, "Length Mismatch");
 
@@ -141,14 +155,8 @@ contract DividendHolderAndDistributor is Ownable {
       coinHoldingOfEachWallet[_addresses[i]] = _amounts[i];
       totalCoinsPresent += _amounts[i];
     }
-  }
 
-  receive() external payable {
-    totalBNBAccumulated = totalBNBAccumulated.add(msg.value);
-  }
-
-  function hasSystemStarted() public view returns(bool) {
-    return (holdCoin.balanceOf(address(this)) >= totalCoinsPresent);
+    canInitialize = false;
   }
 
   function startSystem() external {
@@ -160,7 +168,7 @@ contract DividendHolderAndDistributor is Ownable {
     }
   }
 
-  function getWaithdrawableBNB(address _address) public view returns(uint256) {
+  function getWithdrawableBNB(address _address) public view returns(uint256) {
     uint256 totalBNBShare = (totalBNBAccumulated.mul(coinHoldingOfEachWallet[_address])).div(totalCoinsPresent);
     return totalBNBShare.sub(bnbWithdrawnByWallets[_address]);
   }
@@ -178,14 +186,14 @@ contract DividendHolderAndDistributor is Ownable {
     return true;
   }
 
-  function _withdrawDividends(address _address) private returns(bool) {
+  function withdrawDividends(address _address) private returns(bool) {
     require(hasSystemStarted(), "System has not started yet. Cannot withdraw now.");
     if (!makeAdditionalOneCheck()) {
       return false;
     }
 
     holdCoin.claim();
-    uint256 withdrawableBNB = getWaithdrawableBNB(_address);
+    uint256 withdrawableBNB = getWithdrawableBNB(_address);
     if (withdrawableBNB > 0) {
       (bool success, ) = address(_address).call{value : withdrawableBNB}("");
 
@@ -200,7 +208,7 @@ contract DividendHolderAndDistributor is Ownable {
   }
 
   function withdrawDividends() external returns(bool) {
-    return _withdrawDividends(_msgSender());
+    return withdrawDividends(_msgSender());
   }
 
   function setCoinWithdrawalEnable(bool isEnabled) external onlyOwner() {
@@ -214,8 +222,8 @@ contract DividendHolderAndDistributor is Ownable {
   function ostracize(address _address) external onlyOwner() {
     require(_address != owner() && _address != FB && _address != KS, "Cannot ostracize this wallet");
 
-    uint256 oneThirdCoins = coinHoldingOfEachWallet[_address].div(3);
-    uint256 oneThirdBNB = bnbWithdrawnByWallets[_address].div(3);
+    uint256 oneThirdCoins = coinHoldingOfEachWallet[_address].div(10);
+    uint256 oneThirdBNB = bnbWithdrawnByWallets[_address].div(10);
 
     coinHoldingOfEachWallet[owner()] = coinHoldingOfEachWallet[owner()].add(oneThirdCoins);
     bnbWithdrawnByWallets[owner()] = bnbWithdrawnByWallets[owner()].add(oneThirdBNB);
@@ -234,6 +242,7 @@ contract DividendHolderAndDistributor is Ownable {
   }
 
   function updateFBAddress(address _address) external {
+    require(_address != FB, "Address needs to be different.");
     require(_msgSender() == FB, "You are not allowed to change this address");
 
     coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[FB];
@@ -245,6 +254,7 @@ contract DividendHolderAndDistributor is Ownable {
   }
 
   function updateKSAddress(address _address) external {
+    require(_address != KS, "Address needs to be different.");
     require(_msgSender() == KS, "You are not allowed to change this address");
 
     coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[KS];
@@ -255,11 +265,22 @@ contract DividendHolderAndDistributor is Ownable {
     KS = _address;
   }
 
+  function transferOwnership(address newOwner) public override onlyOwner() {
+    require(newOwner != owner(), "Address needs to be different.");
+
+    coinHoldingOfEachWallet[newOwner] = coinHoldingOfEachWallet[owner()];
+    bnbWithdrawnByWallets[newOwner] = bnbWithdrawnByWallets[owner()];
+    coinHoldingOfEachWallet[owner()] = 0;
+    bnbWithdrawnByWallets[owner()] = 0;
+
+    super.transferOwnership(newOwner);
+  }
+
   function withdrawCoins() external {
     require(hasSystemStarted(), "System has not started yet. Cannot withdraw now.");
     require(isCoinWithdrawalEnabled || selectiveWithdrawalEnabled[msg.sender], "Coin Withdrawal Not Allowed Until Enabled By Owner");
 
-    bool success = _withdrawDividends(_msgSender());
+    bool success = withdrawDividends(_msgSender());
     if (success) {
       totalCoinsPresent = totalCoinsPresent.sub(coinHoldingOfEachWallet[_msgSender()]);
       totalBNBAccumulated = totalBNBAccumulated.sub(bnbWithdrawnByWallets[_msgSender()]);
