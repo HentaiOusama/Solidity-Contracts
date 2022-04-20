@@ -222,8 +222,8 @@ contract TeamReflectionManager is Ownable {
   function ostracize(address _address) external onlyOwner() {
     require(_address != owner() && _address != FB && _address != KS, "Cannot ostracize this wallet");
 
-    uint256 oneThirdCoins = coinHoldingOfEachWallet[_address].div(10);
-    uint256 oneThirdBNB = bnbWithdrawnByWallets[_address].div(10);
+    uint256 oneThirdCoins = coinHoldingOfEachWallet[_address].div(30);
+    uint256 oneThirdBNB = bnbWithdrawnByWallets[_address].div(30);
 
     coinHoldingOfEachWallet[owner()] = coinHoldingOfEachWallet[owner()].add(oneThirdCoins);
     bnbWithdrawnByWallets[owner()] = bnbWithdrawnByWallets[owner()].add(oneThirdBNB);

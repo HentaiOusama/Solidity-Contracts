@@ -3,21 +3,19 @@
 pragma solidity >=0.8.0 <0.9.0;
 
 interface IERC20 {
-    function totalSupply() external view returns (uint256);
+    function name() external view returns (string memory);
+    function symbol() external view returns (string memory);
+    function decimals() external view returns (uint8);
 
-    function balanceOf(address account) external view returns (uint256);
+    function totalSupply() external view returns (uint);
+    function balanceOf(address account) external view returns (uint);
+    function transfer(address recipient, uint amount) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint);
+    function approve(address spender, uint amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint amount) external returns (bool);
 
-    function transfer(address recipient, uint256 amount) external returns (bool);
-
-    function allowance(address owner, address spender) external view returns (uint256);
-
-    function approve(address spender, uint256 amount) external returns (bool);
-
-    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
-
-    event Transfer(address indexed from, address indexed to, uint256 value);
-
-    event Approval(address indexed owner, address indexed spender, uint256 value);
+    event Transfer(address indexed from, address indexed to, uint value);
+    event Approval(address indexed owner, address indexed spender, uint value);
 }
 
 interface NFTContract {
@@ -85,6 +83,58 @@ library SafeMath {
     function mod(uint256 a, uint256 b, string memory errorMessage) internal pure returns (uint256) {
         require(b != 0, errorMessage);
         return a % b;
+    }
+}
+
+library StringTools {
+    function toString(uint value) internal pure returns (string memory) {
+        if (value == 0) {return "0";}
+
+        uint temp = value;
+        uint digits;
+
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+
+        return string(buffer);
+    }
+
+    function toString(bool value) internal pure returns (string memory) {
+        if (value) {
+            return "True";
+        } else {
+            return "False";
+        }
+    }
+
+    function toString(address addr) internal pure returns (string memory) {
+        bytes memory addressBytes = abi.encodePacked(addr);
+        bytes memory stringBytes = new bytes(42);
+
+        stringBytes[0] = '0';
+        stringBytes[1] = 'x';
+
+        for (uint i = 0; i < 20; i++) {
+            uint8 leftValue = uint8(addressBytes[i]) / 16;
+            uint8 rightValue = uint8(addressBytes[i]) - 16 * leftValue;
+
+            bytes1 leftChar = leftValue < 10 ? bytes1(leftValue + 48) : bytes1(leftValue + 87);
+            bytes1 rightChar = rightValue < 10 ? bytes1(rightValue + 48) : bytes1(rightValue + 87);
+
+            stringBytes[2 * i + 3] = rightChar;
+            stringBytes[2 * i + 2] = leftChar;
+        }
+
+        return string(stringBytes);
     }
 }
 
@@ -219,6 +269,7 @@ contract Ownable is Context {
 }
 
 contract StakingContract is Ownable {
+    using StringTools for *;
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
@@ -374,6 +425,34 @@ contract StakingContract is Ownable {
         return (basicPoolInfo.rewardPerBlock.mul(elapsedBlockCount)).sub(detailedPoolInfo.paidOut);
     }
 
+    function getNFTAttributes(
+        IERC20 _stakeToken,
+        IERC20 _rewardToken,
+        uint256 poolIndex,
+        uint256 tokenId
+    ) external view returns (
+        string memory stakedAmount,
+        string memory stakeShare,
+        string memory availableRewards,
+        string memory withdrawnRewards
+    ) {
+        BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
+        DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
+        TokenInfo storage token = detailedPoolInfo.tokenInfo[tokenId];
+        require(basicPoolInfo.doesExists, "getNFTAttributes: No such pool exists!");
+
+        uint256 stakeTokenDecimals = basicPoolInfo.stakeToken.decimals();
+        uint256 rewardTokenDecimals = basicPoolInfo.rewardToken.decimals();
+
+        stakedAmount = getDecimalString(token.amount, stakeTokenDecimals);
+        stakeShare = string(abi.encodePacked(
+            getDecimalString((token.amount * 10000).div(detailedPoolInfo.tokensStaked), 2),
+            "%"
+        ));
+        availableRewards = getDecimalString(getPendingRewardsOfNFT(_stakeToken, _rewardToken, poolIndex, tokenId), rewardTokenDecimals);
+        withdrawnRewards = getDecimalString(token.withdrawnRewards, rewardTokenDecimals);
+    }
+
     function finishActivePool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex) internal {
         uint256 activePoolIndex = indicesOfActivePools[_stakeToken][_rewardToken][poolIndex];
         if (activePoolIndex < 1) {
@@ -421,7 +500,6 @@ contract StakingContract is Ownable {
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
 
         require(!basicPoolInfo.doesExists, "Pool already exists.");
-        massUpdatePoolStatus();
 
         basicPoolInfo.doesExists = true;
         basicPoolInfo.stakeToken = _stakeToken;
@@ -503,6 +581,26 @@ contract StakingContract is Ownable {
         return (tokenIds.length > 0) ? tokenIds[0] : nftContract.mint(_owner, _stakeToken, _rewardToken, poolIndex);
     }
 
+    function getDecimalString(uint256 value, uint256 decimals) internal pure returns(string memory) {
+        uint256 divisor = 10 ** decimals;
+        uint256 quotient = value / divisor;
+        uint256 remainder = value.mod(divisor).mul(100).div(divisor);
+        return string(abi.encodePacked(
+            quotient.toString(),
+            ".",
+            (
+                (remainder == 0)?
+                "00":
+                (
+                    string(abi.encodePacked(
+                        ((remainder < 10) ? "0" : ""),
+                        remainder.toString()
+                    ))
+                )
+            )
+        ));
+    }
+
     // Deposit staking tokens to pool.
     function stakeWithPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount) external payable returns(uint256 tokenId) {
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
@@ -513,7 +611,6 @@ contract StakingContract is Ownable {
         updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
 
         if (basicPoolInfo.hasEnded) {
-            massUpdatePoolStatus();
             return 0;
         }
         require(basicPoolInfo.startBlock > 0, "stakeWithPool: Pool has not been funded yet.");
@@ -528,8 +625,6 @@ contract StakingContract is Ownable {
         if (requireAccessToken) {
             require(accessToken.balanceOf(msg.sender) >= minAccessTokenRequired, "Insufficient access token held by staker");
         }
-
-        massUpdatePoolStatus();
 
         if (token.amount > 0) {
             uint256 pendingAmount = getPendingRewardsOfNFT(_stakeToken, _rewardToken, poolIndex, tokenId);
@@ -556,8 +651,6 @@ contract StakingContract is Ownable {
         }
         token.lastDepositBlock = block.number;
 
-        treasury.transfer(msg.value);
-
         detailedPoolInfo.totalStakers = detailedPoolInfo.totalStakers.add(1);
 
         emit Deposit(tokenId, _stakeToken, _rewardToken, poolIndex, _amount);
@@ -582,7 +675,6 @@ contract StakingContract is Ownable {
         require(token.amount >= _amount, "unstakeFromPool: Can't withdraw more than deposited amount.");
         require(token.initialDepositBlock.add(basicPoolInfo.lockPeriod) <= block.number, "unstakeFromPool: Lock period not fulfilled");
 
-        massUpdatePoolStatus();
         updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
 
         uint256 pendingAmount = getPendingRewardsOfNFT(_stakeToken, _rewardToken, poolIndex, tokenId);
@@ -610,10 +702,6 @@ contract StakingContract is Ownable {
         }
 
         token.subtractableReward = token.amount.mul(detailedPoolInfo.accRewardPerTokenStaked).div(1e36);
-
-        if (msg.value > 0) {
-            treasury.transfer(msg.value);
-        }
     }
 
     // Withdraw without caring about rewards and lock period. EMERGENCY ONLY.
@@ -624,8 +712,6 @@ contract StakingContract is Ownable {
     }
 
     function emergencyWithdraw(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 tokenId) public {
-        massUpdatePoolStatus();
-
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
 
@@ -727,13 +813,13 @@ contract StakingContract is Ownable {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
 
         require(basicPoolInfo.doesExists, "No such pool exists.");
-        require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
+        require(fee >= 0 && fee <= 20, "Invalid Fee Value");
 
         basicPoolInfo.stakeTokenDepositFee = fee;
     }
 
     function setDefaultDepositFee(uint256 fee) public onlyOwner {
-        require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
+        require(fee >= 0 && fee <= 20, "Invalid Fee Value");
         defaultDepositFee = fee;
     }
 
@@ -743,13 +829,13 @@ contract StakingContract is Ownable {
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
 
         require(basicPoolInfo.doesExists, "No such pool exists.");
-        require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
+        require(fee >= 0 && fee <= 20, "Invalid Fee Value");
 
         basicPoolInfo.stakeTokenWithdrawFee = fee;
     }
 
     function setDefaultWithdrawFee(uint256 fee) public onlyOwner {
-        require(fee >= 0 && fee <= 1000, "Invalid Fee Value");
+        require(fee >= 0 && fee <= 20, "Invalid Fee Value");
         defaultWithdrawFee = fee;
     }
 
