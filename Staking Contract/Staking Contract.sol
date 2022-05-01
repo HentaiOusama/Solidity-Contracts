@@ -284,7 +284,7 @@ contract StakingContract is Ownable {
     }
 
     struct TokenInfo {
-        uint256 amount;                         // How many stakeToken are associated with the NFT.
+        uint256 amount;                             // How many stakeToken are associated with the NFT.
         uint256 withdrawnRewards;
         uint256 subtractableReward;
         uint256 initialDepositBlock;
@@ -297,26 +297,26 @@ contract StakingContract is Ownable {
         IERC20 stakeToken;
         IERC20 rewardToken;
         address poolCreator;
-        uint256 createBlock;                    // Block number when the pool was created
-        uint256 startBlock;                     // Block number when reward distribution start
+        uint256 createBlock;                        // Block number when the pool was created
+        uint256 startBlock;                         // Block number when reward distribution start
         uint256 rewardPerBlock;
-        uint256 gasAmount;                      // Eth fee charged on deposits and withdrawals
-        uint256 minStake;                       // Min. tokens that need to be staked
-        uint256 maxStake;                       // Max. tokens that can be staked
-        uint256 stakeTokenDepositFee;           // Fee (divide by 1000, so that 100 => 0.1%)
-        uint256 stakeTokenWithdrawFee;          // Fee (divide by 1000, so that 100 => 0.1%)
-        uint256 lockPeriod;                     // No. of blocks for which the stake tokens are locked
+        uint256 gasAmount;                          // Eth fee charged on deposits and withdrawals
+        uint256 minStake;                           // Min. tokens that need to be staked
+        uint256 maxStake;                           // Max. tokens that can be staked
+        uint256 stakeTokenDepositFee;               // Fee (divide by 1000, so that 100 => 0.1%)
+        uint256 stakeTokenWithdrawFee;              // Fee (divide by 1000, so that 100 => 0.1%)
+        uint256 lockPeriod;                         // No. of blocks for which the stake tokens are locked
     }
 
     struct DetailedPoolInfo {
-        uint256 tokensStaked;                   // Total tokens staked with the pool
-        uint256 accRewardPerTokenStaked;        // (Accumulated reward per token staked) * (1e36).
-        uint256 paidOut;                        // Total rewards distributed by pool
-        uint256 lastRewardBlock;                // Last block number when the accRewardPerTokenStaked was updated
-        uint256 endBlock;                       // Block number when reward distribution ends
+        uint256 tokensStaked;                       // Total tokens staked with the pool
+        uint256 accRewardPerTokenStaked;            // (Accumulated reward per token staked) * (1e36).
+        uint256 paidOut;                            // Total rewards distributed by pool
+        uint256 lastRewardBlock;                    // Last block number when the accRewardPerTokenStaked was updated
+        uint256 endBlock;                           // Block number when reward distribution ends
         uint256 maxStakers;
         uint256 totalStakers;
-        mapping(uint256 => TokenInfo) tokenInfo;  // Info of each token that stakes with the pool
+        mapping(uint256 => TokenInfo) tokenInfo;    // Info of each token that stakes with the pool
     }
 
     bool public hasSetNFTContract = false;
@@ -455,9 +455,10 @@ contract StakingContract is Ownable {
 
         stakedAmount = getDecimalString(token.amount, stakeTokenDecimals);
         stakeShare = string(abi.encodePacked(
-            getDecimalString((token.amount * 10000).div(detailedPoolInfo.tokensStaked), 2),
-            "%"
-        ));
+                getDecimalString((token.amount * 10000).div(detailedPoolInfo.tokensStaked), 2),
+                "%"
+            )
+        );
         availableRewards = getDecimalString(getPendingRewardsOfNFT(_stakeToken, _rewardToken, poolIndex, tokenId), rewardTokenDecimals);
         withdrawnRewards = getDecimalString(token.withdrawnRewards, rewardTokenDecimals);
     }
@@ -542,7 +543,7 @@ contract StakingContract is Ownable {
         // If pool has passed max fund time, it will be ended before funding can be done.
         // Otherwise, nothing will happen based on how the updatePoolStatus function is designed.
         updatePoolStatus(_stakeToken, _rewardToken, poolIndex);
-        if(basicPoolInfo.hasEnded) {
+        if (basicPoolInfo.hasEnded) {
             return;
         }
 
@@ -590,28 +591,21 @@ contract StakingContract is Ownable {
         return (tokenIds.length > 0) ? tokenIds[0] : nftContract.mint(_owner, _stakeToken, _rewardToken, poolIndex);
     }
 
-    function getDecimalString(uint256 value, uint256 decimals) internal pure returns(string memory) {
+    function getDecimalString(uint256 value, uint256 decimals) internal pure returns (string memory) {
         uint256 divisor = 10 ** decimals;
         uint256 quotient = value / divisor;
         uint256 remainder = value.mod(divisor).mul(100).div(divisor);
         return string(abi.encodePacked(
-            quotient.toString(),
-            ".",
-            (
-                (remainder == 0)?
-                "00":
-                (
-                    string(abi.encodePacked(
-                        ((remainder < 10) ? "0" : ""),
-                        remainder.toString()
-                    ))
-                )
+                quotient.toString(),
+                ".",
+                ((remainder < 10) ? "0" : ""),
+                remainder.toString()
             )
-        ));
+        );
     }
 
     // Deposit staking tokens to pool.
-    function stakeWithPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount) external payable returns(uint256 tokenId) {
+    function stakeWithPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 _amount) external payable returns (uint256 tokenId) {
         uint256 poolIndex = latestPoolNumber[_stakeToken][_rewardToken];
         BasicPoolInfo storage basicPoolInfo = allPoolsBasicInfo[_stakeToken][_rewardToken][poolIndex];
         DetailedPoolInfo storage detailedPoolInfo = allPoolsDetailedInfo[_stakeToken][_rewardToken][poolIndex];
@@ -669,7 +663,7 @@ contract StakingContract is Ownable {
     }
 
     // Withdraw staking tokens from pool.
-    function unstakeFromPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _amount) public payable returns(uint256) {
+    function unstakeFromPool(IERC20 _stakeToken, IERC20 _rewardToken, uint256 poolIndex, uint256 _amount) public payable returns (uint256) {
         uint256[] memory tokenIds = nftContract.getTokenIdsOfOwner(_stakeToken, _rewardToken, poolIndex, msg.sender);
         require(tokenIds.length > 0, "No Staking Positions NFT held by the caller.");
         unstakeFromPool(_stakeToken, _rewardToken, poolIndex, _amount, tokenIds[0]);
@@ -795,7 +789,7 @@ contract StakingContract is Ownable {
             if (activePools.length < 2 || rotateCount >= 2) {
                 return;
             }
-            
+
             if (currentPoolToBeUpdated < 1 || currentPoolToBeUpdated >= activePools.length) {
                 rotateCount += 1;
                 currentPoolToBeUpdated = 1;
@@ -874,7 +868,7 @@ contract StakingContract is Ownable {
     }
 
     function transfer() public onlyOwner returns (bool success) {
-        (success, ) = treasury.call{value: address(this).balance}("");
+        (success,) = treasury.call{value : address(this).balance}("");
     }
 
     function withdrawFees(IERC20 withdrawToken, address _to, uint256 _amount) external onlyOwner {
