@@ -444,8 +444,8 @@ abstract contract NFToken is ERC721, NFTokenMetadata, SupportsInterface {
         emit Transfer(address(0), _to, _tokenId);
     }
 
-    function _burn(uint256 _tokenId) internal virtual validNFToken(_tokenId) {
-        address tokenOwner = idToOwner[_tokenId];
+    function _burn(address tokenOwner, uint256 _tokenId) internal virtual validNFToken(_tokenId) {
+        require(tokenOwner == idToOwner[_tokenId], "Invalid tokenOwner specified.");
         _clearApproval(_tokenId);
         _removeNFToken(tokenOwner, _tokenId);
         emit Transfer(tokenOwner, address(0), _tokenId);
@@ -615,8 +615,7 @@ contract NFT_ERC_721 is NFToken, Ownable {
     }
 
     function burn(address _from, uint256 _tokenId) external onlyMinter() {
-        require(_from == idToOwner[_tokenId], "Invalid _from specified.");
-        _burn(_tokenId);
+        _burn(_from, _tokenId);
 
         PoolIdentifier storage poolIdentifier = tokenIdToPoolIdentifier[_tokenId];
         IERC20 stakeToken = poolIdentifier.stakeToken;
