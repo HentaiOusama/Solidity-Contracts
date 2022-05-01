@@ -35,6 +35,10 @@ interface NFTContract {
     function ownerOf(uint256 _tokenId) external view returns (address);
 }
 
+interface FeeExemptionNFT {
+    function getOwnerNFTCount(address _owner) external view returns (uint256);
+}
+
 library SafeMath {
     function add(uint256 a, uint256 b) internal pure returns (uint256) {
         uint256 c = a + b;
@@ -317,6 +321,7 @@ contract StakingContract is Ownable {
 
     bool public hasSetNFTContract = false;
     NFTContract public nftContract = NFTContract(address(0));
+    FeeExemptionNFT public feeExemptionNFT = FeeExemptionNFT(address(0));
 
     IERC20 public accessToken = IERC20(address(0));
     uint256 public minAccessTokenRequired = 0;
@@ -362,11 +367,15 @@ contract StakingContract is Ownable {
         }));
     }
 
-    function setNFTContract(NFTContract _nftContract) external onlyOwner() {
+    function setNFTContract(FeeExemptionNFT _feeExemptionNFT, NFTContract _nftContract) external onlyOwner() {
         require(!hasSetNFTContract, "NFT Contract has already been set.");
+        require(_nftContract != nftContract, "NFT Contract Address should be a new value");
+        require(_feeExemptionNFT != feeExemptionNFT, "Fee exemption NFT Contract Address should be a new value");
+        require(address(_feeExemptionNFT) != address(_nftContract), "Both NFTs cannot be same");
         require(_nftContract.minter() == address(this), "Invalid Minter.");
 
         nftContract = _nftContract;
+        feeExemptionNFT = _feeExemptionNFT;
         hasSetNFTContract = true;
     }
 
@@ -638,9 +647,12 @@ contract StakingContract is Ownable {
         basicPoolInfo.stakeToken.safeTransferFrom(address(msg.sender), address(this), _amount);
         uint256 endTokenBalance = basicPoolInfo.stakeToken.balanceOf(address(this));
         uint256 trueDepositedTokens = endTokenBalance.sub(startTokenBalance);
-        uint256 depositFee = basicPoolInfo.stakeTokenDepositFee.mul(trueDepositedTokens).div(1000);
-        withdrawableFee[_stakeToken] += depositFee;
-        trueDepositedTokens = trueDepositedTokens.sub(depositFee);
+
+        if (feeExemptionNFT.getOwnerNFTCount(msg.sender) < 1) {
+            uint256 depositFee = basicPoolInfo.stakeTokenDepositFee.mul(trueDepositedTokens).div(1000);
+            withdrawableFee[_stakeToken] += depositFee;
+            trueDepositedTokens = trueDepositedTokens.sub(depositFee);
+        }
 
         token.amount = token.amount.add(trueDepositedTokens);
         detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.add(trueDepositedTokens);
@@ -686,8 +698,11 @@ contract StakingContract is Ownable {
         if (_amount > 0) {
             require(msg.value >= basicPoolInfo.gasAmount, "unstakeFromPool: Correct transaction value must be sent.");
 
-            uint256 withdrawFee = basicPoolInfo.stakeTokenWithdrawFee.mul(_amount).div(1000);
-            withdrawableFee[_stakeToken] = withdrawableFee[_stakeToken].add(withdrawFee);
+            uint256 withdrawFee = 0;
+            if (feeExemptionNFT.getOwnerNFTCount(msg.sender) < 1) {
+                withdrawFee = basicPoolInfo.stakeTokenWithdrawFee.mul(_amount).div(1000);
+                withdrawableFee[_stakeToken] = withdrawableFee[_stakeToken].add(withdrawFee);
+            }
 
             basicPoolInfo.stakeToken.safeTransfer(address(msg.sender), _amount.sub(withdrawFee));
             detailedPoolInfo.tokensStaked = detailedPoolInfo.tokensStaked.sub(_amount);

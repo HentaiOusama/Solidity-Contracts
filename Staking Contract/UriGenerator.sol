@@ -134,7 +134,7 @@ interface IUriGenerator {
         string memory stakedAmount,
         string memory stakeShare,
         string memory poolIndex
-    ) external view returns(string memory);
+    ) external view returns (string memory);
 
     function getJSON(
         string memory name,
@@ -145,11 +145,11 @@ interface IUriGenerator {
         string memory stakedAmount,
         string memory availableRewards,
         string memory withdrawnRewards
-    ) external pure returns(string memory);
+    ) external pure returns (string memory);
 
     function getTokenURI(
         string memory json
-    ) external pure returns(string memory);
+    ) external pure returns (string memory);
 }
 
 abstract contract Context {
@@ -198,10 +198,7 @@ contract UriGenerator is IUriGenerator, Ownable {
     string public se;
     string public sf;
 
-    address public operator;
-
-    constructor(address _operator) {
-        operator = _operator;
+    constructor() {
     }
 
     function setSA(string memory _sa) external onlyOwner() {
@@ -228,16 +225,16 @@ contract UriGenerator is IUriGenerator, Ownable {
         sf = _sf;
     }
 
-    function getSvgLeft(string memory stakeTokenSymbol, string memory rewardTokenSymbol) internal view returns(string memory) {
+    function getSvgLeft(string memory stakeTokenSymbol, string memory rewardTokenSymbol) internal view returns (string memory) {
         return string(abi.encodePacked(
-            sa, stakeTokenSymbol, sb, rewardTokenSymbol, sc
-        ));
+                sa, stakeTokenSymbol, sb, rewardTokenSymbol, sc
+            ));
     }
 
-    function getSvgRight(string memory stakedAmount, string memory stakeShare, string memory poolIndex) internal view returns(string memory) {
+    function getSvgRight(string memory stakedAmount, string memory stakeShare, string memory poolIndex) internal view returns (string memory) {
         return string(abi.encodePacked(
-            stakedAmount, sd, stakeShare, se, poolIndex, sf
-        ));
+                stakedAmount, sd, stakeShare, se, poolIndex, sf
+            ));
     }
 
     function getJSONLeft(string memory name, string memory encodedSvg) internal pure returns(string memory) {
@@ -251,36 +248,36 @@ contract UriGenerator is IUriGenerator, Ownable {
 
     function getJSONMid(string memory stakeToken, string memory rewardToken, string memory poolIndex) internal pure returns(string memory) {
         return string(abi.encodePacked(
-            "{"
-                "\"trait_type\": \"Stake Token\","
-                "\"value\": \"", stakeToken, "\""
-            "},"
-            "{"
-                "\"trait_type\": \"Reward Token\","
-                "\"value\": \"", rewardToken, "\""
-            "},"
-            "{"
-                "\"trait_type\": \"Pool Index\","
-                "\"value\": \"", poolIndex, "\""
-            "},"
+                    "{"
+                        "\"trait_type\": \"Stake Token\","
+                        "\"value\": \"", stakeToken, "\""
+                    "},"
+                    "{"
+                        "\"trait_type\": \"Reward Token\","
+                        "\"value\": \"", rewardToken, "\""
+                    "},"
+                    "{"
+                        "\"trait_type\": \"Pool Index\","
+                        "\"value\": \"", poolIndex, "\""
+                    "},"
         ));
     }
 
     function getJSONRight(string memory stakedAmount, string memory availableRewards, string memory withdrawnRewards) internal pure returns(string memory) {
         return string(abi.encodePacked(
-                "{"
-                    "\"trait_type\": \"Amount Staked\","
-                    "\"value\": \"", stakedAmount, "\""
-                "},"
-                "{"
-                    "\"trait_type\": \"Available Rewards\","
-                    "\"value\": \"", availableRewards, "\""
-                "},"
-                "{"
-                    "\"trait_type\": \"Rewards Withdrawn\","
-                    "\"value\": \"", withdrawnRewards, "\""
-                "}"
-            "]"
+                    "{"
+                        "\"trait_type\": \"Amount Staked\","
+                        "\"value\": \"", stakedAmount, "\""
+                    "},"
+                    "{"
+                        "\"trait_type\": \"Available Rewards\","
+                        "\"value\": \"", availableRewards, "\""
+                    "},"
+                    "{"
+                        "\"trait_type\": \"Rewards Withdrawn\","
+                        "\"value\": \"", withdrawnRewards, "\""
+                    "}"
+                "]"
             "}"
         ));
     }
@@ -291,11 +288,11 @@ contract UriGenerator is IUriGenerator, Ownable {
         string memory stakedAmount,
         string memory stakeShare,
         string memory poolIndex
-    ) external view returns(string memory) {
+    ) external view returns (string memory) {
         return Base64.encode(bytes(string(abi.encodePacked(
-            getSvgLeft(stakeTokenSymbol, rewardTokenSymbol),
-            getSvgRight(stakedAmount, stakeShare, poolIndex)
-        ))));
+                getSvgLeft(stakeTokenSymbol, rewardTokenSymbol),
+                getSvgRight(stakedAmount, stakeShare, poolIndex)
+            ))));
     }
 
     function getJSON(
@@ -307,22 +304,22 @@ contract UriGenerator is IUriGenerator, Ownable {
         string memory stakedAmount,
         string memory availableRewards,
         string memory withdrawnRewards
-    ) external pure returns(string memory) {
+    ) external pure returns (string memory) {
         return string(abi.encodePacked(
-            getJSONLeft(name, encodedSvg),
-            getJSONMid(stakeToken, rewardToken, poolIndex),
-            getJSONRight(stakedAmount, availableRewards, withdrawnRewards)
-        ));
+                getJSONLeft(name, encodedSvg),
+                getJSONMid(stakeToken, rewardToken, poolIndex),
+                getJSONRight(stakedAmount, availableRewards, withdrawnRewards)
+            ));
     }
 
     function getTokenURI(
         string memory json
-    ) external pure returns(string memory) {
+    ) external pure returns (string memory) {
         return string(abi.encodePacked(
-            "data:application/json;base64,",
-            Base64.encode(bytes(
-                json
-            ))
-        ));
+                "data:application/json;base64,",
+                Base64.encode(bytes(
+                    json
+                ))
+            ));
     }
 }

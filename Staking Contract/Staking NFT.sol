@@ -190,7 +190,7 @@ library Base64 {
 
 
 interface IUriGenerator {
-    function operator() external view returns(string memory);
+    function operator() external view returns (string memory);
 
     function getEncodedSvg(
         string memory stakeTokenSymbol,
@@ -198,7 +198,7 @@ interface IUriGenerator {
         string memory stakedAmount,
         string memory stakeShare,
         string memory poolIndex
-    ) external view returns(string memory);
+    ) external view returns (string memory);
 
     function getJSON(
         string memory name,
@@ -209,11 +209,11 @@ interface IUriGenerator {
         string memory stakedAmount,
         string memory availableRewards,
         string memory withdrawnRewards
-    ) external pure returns(string memory);
+    ) external pure returns (string memory);
 
     function getTokenURI(
         string memory json
-    ) external pure returns(string memory);
+    ) external pure returns (string memory);
 }
 
 interface IERC20 {
@@ -532,15 +532,13 @@ contract NFT_ERC_721 is NFToken, Ownable {
     mapping(uint256 => PoolIdentifier) public tokenIdToPoolIdentifier;
     mapping(IERC20 => mapping(IERC20 => mapping(uint256 => mapping(address => uint256[])))) public poolTypeAndOwnerToTokenId;
 
-    constructor(string memory name, string memory symbol, address _minter) {
+    constructor(string memory name, string memory symbol, address _minter, IUriGenerator _uriGenerator) {
         supportedInterfaces[0x5b5e139f] = true;
         nftName = name;
         nftSymbol = symbol;
+
         minter = _minter;
         stakingContract = StakingContract(_minter);
-    }
-
-    function setUriGenerator(IUriGenerator _uriGenerator) external onlyOwner() {
         uriGenerator = _uriGenerator;
     }
 
@@ -641,7 +639,7 @@ contract NFT_ERC_721 is NFToken, Ownable {
         nftSymbol = symbol;
     }
 
-    function getTokenParameters(uint256 _tokenId) external view validNFToken(_tokenId) returns(IERC20, IERC20, uint256) {
+    function getTokenParameters(uint256 _tokenId) external view validNFToken(_tokenId) returns (IERC20, IERC20, uint256) {
         PoolIdentifier storage poolIdentifier = tokenIdToPoolIdentifier[_tokenId];
         return (poolIdentifier.stakeToken, poolIdentifier.rewardToken, poolIdentifier.poolIndex);
     }
@@ -663,9 +661,9 @@ contract NFT_ERC_721 is NFToken, Ownable {
 
     function getDetailsOfToken(PoolIdentifier storage poolIdentifier) internal view returns (string memory, string memory, string memory) {
         return (
-			address(poolIdentifier.stakeToken).toString(),
-			address(poolIdentifier.rewardToken).toString(),
-			poolIdentifier.poolIndex.toString()
+            address(poolIdentifier.stakeToken).toString(),
+            address(poolIdentifier.rewardToken).toString(),
+            poolIdentifier.poolIndex.toString()
         );
     }
 
@@ -678,7 +676,7 @@ contract NFT_ERC_721 is NFToken, Ownable {
         string memory stakeShare,
         string memory availableRewards,
         string memory withdrawnRewards
-    ) internal view returns(string memory) {
+    ) internal view returns (string memory) {
         string memory encodedSvg = getEncodedSvg(poolIdentifier, poolIndex, stakedAmount, stakeShare);
 
         string memory json = uriGenerator.getJSON(
@@ -713,7 +711,7 @@ contract NFT_ERC_721 is NFToken, Ownable {
         return poolTypeAndOwnerToTokenId[stakeToken][rewardToken][poolIndex][_owner];
     }
 
-    function getAllTokenIdsOfOwner(address _owner) external view returns(uint256[] memory) {
+    function getAllTokenIdsOfOwner(address _owner) external view returns (uint256[] memory) {
         return allTokenIdsOfUser[_owner];
     }
 }
