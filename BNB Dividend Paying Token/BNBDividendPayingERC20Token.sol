@@ -33,12 +33,12 @@ contract Ownable is Context {
         _;
     }
 
-    function renounceOwnership() external virtual onlyOwner {
+    function renounceOwnership() external virtual onlyOwner() {
         emit OwnershipTransferred(_owner, address(0));
         _owner = address(0);
     }
 
-    function transferOwnership(address newOwner) external virtual onlyOwner {
+    function transferOwnership(address newOwner) external virtual onlyOwner() {
         require(newOwner != address(0), "Ownable: new owner is the zero address");
         emit OwnershipTransferred(_owner, newOwner);
         _owner = newOwner;
@@ -682,7 +682,7 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
         require(false, "withdrawDividend disabled. Use the 'claim' function on the main contract.");
     }
 
-    function excludeFromDividends(address account) external onlyOwner {
+    function excludeFromDividends(address account) external onlyOwner() {
         require(!excludedFromDividends[account]);
         excludedFromDividends[account] = true;
 
@@ -692,7 +692,7 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
         emit ExcludeFromDividends(account);
     }
 
-    function updateClaimWait(uint256 newClaimWait) external onlyOwner {
+    function updateClaimWait(uint256 newClaimWait) external onlyOwner() {
         require(newClaimWait >= 3600 && newClaimWait <= 86400, "claimWait must be updated to between 1 and 24 hours");
         require(newClaimWait != claimWait, "Cannot update claimWait to same value");
         emit ClaimWaitUpdated(newClaimWait, claimWait);
@@ -747,7 +747,7 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
         return (block.timestamp - lastClaimTime) >= claimWait;
     }
 
-    function setBalance(address payable account, uint256 newBalance) external onlyOwner {
+    function setBalance(address payable account, uint256 newBalance) external onlyOwner() {
         if (excludedFromDividends[account]) {return;}
 
         if (newBalance >= minimumTokenBalanceForDividends) {
@@ -816,6 +816,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
     FeeSet public buyFee;
     uint256 immutable oneWeek = 7 * 24 * 60 * 60;
     mapping(address => bool) private _isExcludedFromFees;
+    mapping(address => bool) public embargoedAddresses;
     mapping(address => uint256) public effectiveObtainTime;
 
     uint256 availableLiquidityFee;
@@ -943,11 +944,19 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         return (block.timestamp - effectiveObtainTime[_address]) / oneWeek;
     }
 
-    function excludeFromFees(address account, bool excluded) public onlyOwner {
+    function embargoAddress(address account, bool shouldEmbargo) external onlyOwner() {
+        embargoedAddresses[account] = shouldEmbargo;
+    }
+
+    function excludeFromFees(address account, bool excluded) public onlyOwner() {
         require(_isExcludedFromFees[account] != excluded, "Account is already excluded");
         _isExcludedFromFees[account] = excluded;
 
         emit ExcludeFromFees(account, excluded);
+    }
+
+    function excludeFromDividends(address account) external onlyOwner() {
+        dividendTracker.excludeFromDividends(account);
     }
 
     function setIsSwappingEnabled(bool shouldEnable) external onlyOwner() {
@@ -1006,6 +1015,9 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
 
     function _transfer(address from, address to, uint256 amount) internal override {
         require(from != address(0), "Transfer from the zero address");
+        if (from != owner() && to != owner()) {
+            require(!embargoedAddresses[from] && !embargoedAddresses[to], "Cannot associate with embargoed users");
+        }
 
         if (isInitialEntrance && !swapping) {
             uint256 requiredGasValue = gasForProcessing + 400000;
@@ -1082,9 +1094,15 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         }
     }
 
+    function burn(uint256 amount) external {
+        require(balanceOf(msg.sender) >= amount, "Insufficient Balance");
+        _burn(msg.sender, amount);
+        try dividendTracker.setBalance(payable(msg.sender), balanceOf(msg.sender)) {} catch {}
+    }
+
     // -----------------------------Dividend Related------------------------------------- //
 
-    function updateDividendTracker(address newAddress) external onlyOwner {
+    function updateDividendTracker(address newAddress) external onlyOwner() {
         require(newAddress != address(dividendTracker), "The dividend tracker already has that address");
 
         DividendTracker newDividendTracker = DividendTracker(payable(newAddress));
@@ -1102,14 +1120,14 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         dividendTracker = newDividendTracker;
     }
 
-    function updateGasForProcessing(uint256 newValue) external onlyOwner {
+    function updateGasForProcessing(uint256 newValue) external onlyOwner() {
         require(newValue != gasForProcessing, "Cannot update gasForProcessing to same value");
         require(newValue <= block.gaslimit - 500000, "New Value too High");
         emit GasForProcessingUpdated(newValue, gasForProcessing);
         gasForProcessing = newValue;
     }
 
-    function updateClaimWait(uint256 claimWait) external onlyOwner {
+    function updateClaimWait(uint256 claimWait) external onlyOwner() {
         dividendTracker.updateClaimWait(claimWait);
     }
 
@@ -1172,13 +1190,13 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
 
     // -------------------------- AMM Related ------------------------------- //
 
-    function updateUniswapV2Router(address newAddress) external onlyOwner {
+    function updateUniswapV2Router(address newAddress) external onlyOwner() {
         require(newAddress != address(uniswapV2Router), "The router already has that address");
         emit UpdateUniswapV2Router(newAddress, address(uniswapV2Router));
         uniswapV2Router = IUniswapV2Router02(newAddress);
     }
 
-    function setAutomatedMarketMakerPair(address pair, bool value) external onlyOwner {
+    function setAutomatedMarketMakerPair(address pair, bool value) external onlyOwner() {
         require(pair != uniswapV2Pair, "The PancakeSwap pair cannot be removed from automatedMarketMakerPairs");
 
         _setAutomatedMarketMakerPair(pair, value);
