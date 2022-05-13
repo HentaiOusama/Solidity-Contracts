@@ -333,32 +333,31 @@ contract ChessBettor is Ownable {
   }
 
   function updateAllClaimedVotesAndListOfUnclaimedVotes(address _address, uint256[] memory toBeClaimedGamesIndices, int8[] memory results) internal {
-    uint256 max = toBeClaimedGamesIndices.length;
-    string[] storage unclaimedGames = allPlayerData[_address].gamesWithUnclaimedBalance;
-    uint256 lastIndex = unclaimedGames.length - 1;
     UserData storage userData = allPlayerData[_address];
+    string[] storage unclaimedGames = userData.gamesWithUnclaimedBalance;
+    uint256 lastIndex = unclaimedGames.length;
 
-    for (uint256 i = max - 1; (i >= 0) && (i < max) ; i--) {
-      uint256 currentIndex = toBeClaimedGamesIndices[i];
+    for (uint256 i = toBeClaimedGamesIndices.length; i > 0; i--) {
+      uint256 currentIndex = toBeClaimedGamesIndices[i - 1];
 
       Game storage game = existingGames[unclaimedGames[currentIndex]];
       game.voteList[game.aI][game.voteIndex[game.aI][_address]].claimed = true;
 
-      userData.undetermined -= 1;
-      if (results[currentIndex] == 0) {
+      userData.undetermined = userData.undetermined.sub(1);
+      if (results[i - 1] == 0) {
         userData.draws = userData.draws.add(1);
-      } else if (results[currentIndex] == 1) {
+      } else if (results[i - 1] == 1) {
         userData.wins = userData.wins.add(1);
-      } else if (results[currentIndex] == - 1) {
+      } else if (results[i - 1] == - 1) {
         userData.losses = userData.losses.add(1);
       }
-      // results[currentIndex] == - 2  =>  Invalid Game Id. Do nothing, just pop.
+      // results[i - 1] == - 2  =>  Invalid Game Id. Do nothing, just pop.
 
-      unclaimedGames[currentIndex] = unclaimedGames[lastIndex];
-      lastIndex--;
+      unclaimedGames[currentIndex] = unclaimedGames[lastIndex - 1];
+      lastIndex -= 1;
     }
 
-    for (uint256 i = 0; i < max; i++) {
+    for (uint256 i = 0; i < toBeClaimedGamesIndices.length; i++) {
       unclaimedGames.pop();
     }
   }
@@ -399,6 +398,9 @@ contract ChessBettor is Ownable {
 
   function getValidAmounts(Game storage game) internal view returns (uint256 totalAmount, uint256 amountWhite, uint256 amountBlack) {
     Vote[] storage voteList = game.voteList[game.aI];
+    totalAmount = 0;
+    amountWhite = 0;
+    amountBlack = 0;
 
     for (uint256 i = 1; i < voteList.length; i++) {
       Vote storage vote = voteList[i];
