@@ -122,14 +122,6 @@ library StringTools {
 
         return string(buffer);
     }
-
-    function toString(bool value) internal pure returns (string memory) {
-        if (value) {
-            return "True";
-        } else {
-            return "False";
-        }
-    }
 }
 
 interface IUniswapV2Pair {
@@ -582,7 +574,7 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
 
     uint256 public totalDividendsDistributed;
 
-    constructor(string memory _name, string memory _symbol, uint8 _decimals) ERC20(_name, _symbol, _decimals) {
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_, decimals_) {
     }
 
     receive() external payable {distributeDividends();}
@@ -636,14 +628,6 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
         return ((magnifiedDividendPerShare * balanceOf(_owner)).toInt256Safe() + magnifiedDividendCorrections[_owner]).toUint256Safe() / magnitude;
     }
 
-    function _transfer(address from, address to, uint256 value) internal virtual override {
-        require(false);
-
-        int256 _magCorrection = (magnifiedDividendPerShare * value).toInt256Safe();
-        magnifiedDividendCorrections[from] = magnifiedDividendCorrections[from] + _magCorrection;
-        magnifiedDividendCorrections[to] = magnifiedDividendCorrections[to] - _magCorrection;
-    }
-
     function _mint(address account, uint256 value) internal override {
         super._mint(account, value);
 
@@ -684,9 +668,9 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
 
     event Claim(address indexed account, uint256 amount, bool indexed automatic);
 
-    constructor(string memory _symbol, uint8 _decimals, uint256 _minimumTokenBalanceForDividends) DividendPayingToken(_symbol, _symbol, _decimals) {
+    constructor(string memory symbol_, uint8 decimals_, uint256 minimumTokenBalanceForDividends_) DividendPayingToken(symbol_, symbol_, decimals_) {
         claimWait = 3600;
-        minimumTokenBalanceForDividends = _minimumTokenBalanceForDividends * (10 ** decimals());
+        minimumTokenBalanceForDividends = minimumTokenBalanceForDividends_ * (10 ** decimals());
         // Must hold minimum tokens to receive dividends
     }
 
@@ -855,6 +839,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
     event UpdateDividendTracker(address indexed newAddress, address indexed oldAddress);
     event UpdateUniswapV2Router(address indexed newAddress, address indexed oldAddress);
     event ExcludeFromFees(address indexed account, bool isExcluded);
+    event SetSwapTokensAtAmount(uint256 oldAmount, uint256 newAmount);
     event SetAutomatedMarketMakerPair(address indexed pair, bool indexed value);
     event GasForProcessingUpdated(uint256 indexed newValue, uint256 indexed oldValue);
     event FeeChargedAfterHoldingFor(address indexed account, uint256 numOfWeeks, uint256 fromTimestamp, uint256 toTimestamp);
@@ -877,13 +862,13 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
     );
 
     constructor(
-        string memory _tokenName,
-        string memory _tokenSymbol,
-        uint8 _decimals,
-        uint256 _totalSupply,
-        uint256 _swapTokensAtAmount,
-        uint256 _minimumTokenBalanceForDividends
-    ) ERC20(_tokenName, _tokenSymbol, _decimals) {
+        string memory tokenName_,
+        string memory tokenSymbol_,
+        uint8 decimals_,
+        uint256 totalSupply_,
+        uint256 swapTokensAtAmount_,
+        uint256 minimumTokenBalanceForDividends_
+    ) ERC20(tokenName_, tokenSymbol_, decimals_) {
         // Week 0
         weeklyFee.push(FeeSet(120, 150, 30));
         // Week 1
@@ -927,7 +912,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
 
         buyFee = FeeSet(15, 25, 10);
 
-        dividendTracker = new DividendTracker(_tokenSymbol.appendString("-DT"), decimals(), _minimumTokenBalanceForDividends);
+        dividendTracker = new DividendTracker(tokenSymbol_.appendString("-DT"), decimals(), minimumTokenBalanceForDividends_);
 
         uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
         uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).createPair(address(this), uniswapV2Router.WETH());
@@ -943,8 +928,8 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         excludeFromFees(owner(), true);
         canTransferBeforeTradingIsEnabled[owner()] = true;
 
-        swapTokensAtAmount = _swapTokensAtAmount * (10 ** decimals());
-        _mint(owner(), _totalSupply * (10 ** decimals()));
+        swapTokensAtAmount = swapTokensAtAmount_ * (10 ** decimals());
+        _mint(owner(), totalSupply_ * (10 ** decimals()));
     }
 
     receive() external payable {
@@ -975,6 +960,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
     }
 
     function setSwapTokensAtAmount(uint256 _swapTokensAtAmount) external onlyOwner() {
+        emit SetSwapTokensAtAmount(swapTokensAtAmount, _swapTokensAtAmount);
         swapTokensAtAmount = _swapTokensAtAmount;
     }
 
@@ -984,7 +970,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         buyFee.liquidityFee = liquidityFee;
 
         uint256 total = burnFee + holderFee + liquidityFee;
-        require((total >= 0) && (total <= 50), "Invalid total buy fee.");
+        require(total <= 50, "Invalid total buy fee.");
     }
 
     function setWeeklyFees(uint256 weekNumber, uint256 burnFee, uint256 holderFee, uint256 liquidityFee) external onlyOwner() {
@@ -995,7 +981,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         weeklyFee[weekNumber].liquidityFee = liquidityFee;
 
         uint256 total = burnFee + holderFee + liquidityFee;
-        require((total >= 0) && (total <= 300), "Invalid total week fee.");
+        require(total <= 300, "Invalid total week fee.");
     }
 
     function recoverLostCoins(address coinAddress, address receiveWallet, uint256 amount) external onlyOwner() {
