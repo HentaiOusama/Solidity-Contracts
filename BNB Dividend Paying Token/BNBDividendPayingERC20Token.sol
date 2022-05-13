@@ -75,38 +75,6 @@ interface IERC20Metadata is IERC20 {
 }
 
 library SafeMathInt {
-    int256 private constant MIN_INT256 = int256(1) << 255;
-    int256 private constant MAX_INT256 = ~(int256(1) << 255);
-
-    function mul(int256 a, int256 b) internal pure returns (int256) {
-        int256 c = a * b;
-        require(c != MIN_INT256 || (a & MIN_INT256) != (b & MIN_INT256), "SafeMathInt: Mul Error 1");
-        require((b == 0) || (c / b == a), "SafeMathInt: Mul Error 2");
-        return c;
-    }
-
-    function div(int256 a, int256 b) internal pure returns (int256) {
-        require(b != - 1 || a != MIN_INT256, "SafeMathInt: Div Error 1");
-        return a / b;
-    }
-
-    function sub(int256 a, int256 b) internal pure returns (int256) {
-        int256 c = a - b;
-        require((b >= 0 && c <= a) || (b < 0 && c > a), "SafeMathInt: Sub Error 1");
-        return c;
-    }
-
-    function add(int256 a, int256 b) internal pure returns (int256) {
-        int256 c = a + b;
-        require((b >= 0 && c >= a) || (b < 0 && c < a), "SafeMathInt: Add Error 1");
-        return c;
-    }
-
-    function abs(int256 a) internal pure returns (int256) {
-        require(a != MIN_INT256, "SafeMathInt: Abs Error 1");
-        return a < 0 ? - a : a;
-    }
-
     function toUint256Safe(int256 a) internal pure returns (uint256) {
         require(a >= 0, "SafeMathInt: toUint256Safe Error 1");
         return uint256(a);
@@ -118,56 +86,6 @@ library SafeMathUint {
         int256 b = int256(a);
         require(b >= 0, "SafeMathUint: toInt256Safe Error 1");
         return b;
-    }
-}
-
-library SafeMath {
-    using StringTools for *;
-
-    function add(uint256 a, uint256 b) internal pure returns (uint256) {
-        uint256 c = a + b;
-        require(c >= a, "SafeMath: addition overflow");
-        return c;
-    }
-
-    function sub(uint256 a, uint256 b) internal pure returns (uint256) {
-        return sub(a, b, "SafeMath: subtraction overflow");
-    }
-
-    function sub(uint256 a, uint256 b, string memory errorMessage) internal pure returns (uint256) {
-        require(b <= a, "SafeMath: subtraction overflow : ".appendString(errorMessage));
-        uint256 c = a - b;
-        return c;
-    }
-
-    function mul(uint256 a, uint256 b) internal pure returns (uint256) {
-        if (a == 0) {
-            return 0;
-        }
-
-        uint256 c = a * b;
-        require(c / a == b, "SafeMath: multiplication overflow");
-
-        return c;
-    }
-
-    function div(uint256 a, uint256 b) internal pure returns (uint256) {
-        return div(a, b, "SafeMath: division by zero");
-    }
-
-    function div(uint256 a, uint256 b, string memory errorMessage) internal pure returns (uint256) {
-        require(b > 0, errorMessage);
-        uint256 c = a / b;
-        return c;
-    }
-
-    function mod(uint256 a, uint256 b) internal pure returns (uint256) {
-        return mod(a, b, "SafeMath: modulo by zero");
-    }
-
-    function mod(uint256 a, uint256 b, string memory errorMessage) internal pure returns (uint256) {
-        require(b != 0, errorMessage);
-        return a % b;
     }
 }
 
@@ -460,8 +378,6 @@ interface IUniswapV2Router02 is IUniswapV2Router01 {
 }
 
 contract ERC20 is Context, IERC20, IERC20Metadata {
-    using SafeMath for uint256;
-
     mapping(address => uint256) private _balances;
     mapping(address => mapping(address => uint256)) private _allowances;
 
@@ -516,7 +432,8 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         uint256 amount
     ) public virtual override returns (bool) {
         _transfer(sender, recipient, amount);
-        _approve(sender, _msgSender(), _allowances[sender][_msgSender()].sub(amount, "ERC20: Transfer amount exceeds allowance"));
+        require(_allowances[sender][_msgSender()] >= amount, "ERC20: Transfer amount exceeds allowance");
+        _approve(sender, _msgSender(), _allowances[sender][_msgSender()] - amount);
         return true;
     }
 
@@ -526,31 +443,28 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         uint256 amount
     ) internal virtual {
         require(sender != address(0), "ERC20: Transfer from the zero address");
+        require(_balances[sender] >= amount, "ERC20: Transfer amount exceeds balance");
 
-        _beforeTokenTransfer(sender, recipient, amount);
+        _balances[sender] = _balances[sender] - amount;
+        _balances[recipient] = _balances[recipient] + amount;
 
-        _balances[sender] = _balances[sender].sub(amount, "ERC20: Transfer amount exceeds balance");
-        _balances[recipient] = _balances[recipient].add(amount);
         emit Transfer(sender, recipient, amount);
     }
 
     function _mint(address account, uint256 amount) internal virtual {
         require(account != address(0), "ERC20: Mint to the zero address");
 
-        _beforeTokenTransfer(address(0), account, amount);
-
-        _totalSupply = _totalSupply.add(amount);
-        _balances[account] = _balances[account].add(amount);
+        _totalSupply = _totalSupply + amount;
+        _balances[account] = _balances[account] + amount;
         emit Transfer(address(0), account, amount);
     }
 
     function _burn(address account, uint256 amount) internal virtual {
         require(account != address(0), "ERC20: Burn from the zero address");
+        require(_balances[account] >= amount, "ERC20: Burn amount exceeds balance");
 
-        _beforeTokenTransfer(account, address(0), amount);
-
-        _balances[account] = _balances[account].sub(amount, "ERC20: Burn amount exceeds balance");
-        _totalSupply = _totalSupply.sub(amount);
+        _balances[account] = _balances[account] - amount;
+        _totalSupply = _totalSupply - amount;
         emit Transfer(account, address(0), amount);
     }
 
@@ -565,12 +479,6 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         _allowances[owner][spender] = amount;
         emit Approval(owner, spender, amount);
     }
-
-    function _beforeTokenTransfer(
-        address from,
-        address to,
-        uint256 amount
-    ) internal virtual {}
 }
 
 contract IterableMapping {
@@ -662,7 +570,6 @@ interface DividendPayingTokenInterface {
 }
 
 contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPayingTokenOptionalInterface {
-    using SafeMath for uint256;
     using SafeMathUint for uint256;
     using SafeMathInt for int256;
 
@@ -684,10 +591,10 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
         require(totalSupply() > 0);
 
         if (msg.value > 0) {
-            magnifiedDividendPerShare = magnifiedDividendPerShare.add((msg.value).mul(magnitude) / totalSupply());
+            magnifiedDividendPerShare = magnifiedDividendPerShare + ((msg.value * magnitude) / totalSupply());
             emit DividendsDistributed(_msgSender(), msg.value);
 
-            totalDividendsDistributed = totalDividendsDistributed.add(msg.value);
+            totalDividendsDistributed = totalDividendsDistributed + msg.value;
         }
     }
 
@@ -698,12 +605,12 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
     function _withdrawDividendOfUser(address payable user) internal returns (uint256) {
         uint256 _withdrawableDividend = withdrawableDividendOf(user);
         if (_withdrawableDividend > 0) {
-            withdrawnDividends[user] = withdrawnDividends[user].add(_withdrawableDividend);
+            withdrawnDividends[user] = withdrawnDividends[user] + _withdrawableDividend;
             emit DividendWithdrawn(user, _withdrawableDividend);
-            (bool success,) = user.call{value : _withdrawableDividend, gas : 5000}("");
+            (bool success,) = user.call{value : _withdrawableDividend, gas : 21000}("");
 
             if (!success) {
-                withdrawnDividends[user] = withdrawnDividends[user].sub(_withdrawableDividend);
+                withdrawnDividends[user] = withdrawnDividends[user] - _withdrawableDividend;
                 return 0;
             }
 
@@ -718,7 +625,7 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
     }
 
     function withdrawableDividendOf(address _owner) public view override returns (uint256) {
-        return accumulativeDividendOf(_owner).sub(withdrawnDividends[_owner]);
+        return accumulativeDividendOf(_owner) - withdrawnDividends[_owner];
     }
 
     function withdrawnDividendOf(address _owner) public view override returns (uint256) {
@@ -726,55 +633,49 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
     }
 
     function accumulativeDividendOf(address _owner) public view override returns (uint256) {
-        return magnifiedDividendPerShare.mul(balanceOf(_owner)).toInt256Safe()
-        .add(magnifiedDividendCorrections[_owner]).toUint256Safe() / magnitude;
+        return ((magnifiedDividendPerShare * balanceOf(_owner)).toInt256Safe() + magnifiedDividendCorrections[_owner]).toUint256Safe() / magnitude;
     }
 
     function _transfer(address from, address to, uint256 value) internal virtual override {
         require(false);
 
-        int256 _magCorrection = magnifiedDividendPerShare.mul(value).toInt256Safe();
-        magnifiedDividendCorrections[from] = magnifiedDividendCorrections[from].add(_magCorrection);
-        magnifiedDividendCorrections[to] = magnifiedDividendCorrections[to].sub(_magCorrection);
+        int256 _magCorrection = (magnifiedDividendPerShare * value).toInt256Safe();
+        magnifiedDividendCorrections[from] = magnifiedDividendCorrections[from] + _magCorrection;
+        magnifiedDividendCorrections[to] = magnifiedDividendCorrections[to] - _magCorrection;
     }
 
     function _mint(address account, uint256 value) internal override {
         super._mint(account, value);
 
-        magnifiedDividendCorrections[account] = magnifiedDividendCorrections[account]
-        .sub((magnifiedDividendPerShare.mul(value)).toInt256Safe());
+        magnifiedDividendCorrections[account] = magnifiedDividendCorrections[account] - (magnifiedDividendPerShare * value).toInt256Safe();
     }
 
     function _burn(address account, uint256 value) internal override {
         super._burn(account, value);
 
-        magnifiedDividendCorrections[account] = magnifiedDividendCorrections[account]
-        .add((magnifiedDividendPerShare.mul(value)).toInt256Safe());
+        magnifiedDividendCorrections[account] = (magnifiedDividendCorrections[account] + (magnifiedDividendPerShare * value).toInt256Safe());
     }
 
     function _setBalance(address account, uint256 newBalance) internal {
         uint256 currentBalance = balanceOf(account);
 
         if (newBalance > currentBalance) {
-            uint256 mintAmount = newBalance.sub(currentBalance);
+            uint256 mintAmount = newBalance - currentBalance;
             _mint(account, mintAmount);
         } else if (newBalance < currentBalance) {
-            uint256 burnAmount = currentBalance.sub(newBalance);
+            uint256 burnAmount = currentBalance - newBalance;
             _burn(account, burnAmount);
         }
     }
 }
 
 contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
-    using SafeMath for uint256;
     using SafeMathInt for int256;
 
-    uint256 public lastProcessedIndex;
-
     mapping(address => bool) public excludedFromDividends;
-
     mapping(address => uint256) public lastClaimTimes;
 
+    uint256 public lastProcessedIndex;
     uint256 public claimWait;
     uint256 public immutable minimumTokenBalanceForDividends;
 
@@ -783,8 +684,7 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
 
     event Claim(address indexed account, uint256 amount, bool indexed automatic);
 
-    constructor(string memory _symbol, uint8 _decimals, uint256 _minimumTokenBalanceForDividends)
-    DividendPayingToken(_symbol, _symbol, _decimals) {
+    constructor(string memory _symbol, uint8 _decimals, uint256 _minimumTokenBalanceForDividends) DividendPayingToken(_symbol, _symbol, _decimals) {
         claimWait = 3600;
         minimumTokenBalanceForDividends = _minimumTokenBalanceForDividends * (10 ** decimals());
         // Must hold minimum tokens to receive dividends
@@ -825,7 +725,8 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
 
     function getAccount(address _account) public view returns (
         address account, int256 index, int256 iterationsUntilProcessed, uint256 withdrawableDividends,
-        uint256 totalDividends, uint256 lastClaimTime, uint256 nextClaimTime, uint256 secondsUntilAutoClaimAvailable) {
+        uint256 totalDividends, uint256 lastClaimTime, uint256 nextClaimTime, uint256 secondsUntilAutoClaimAvailable
+    ) {
 
         account = _account;
         index = iterableMapGetIndexOfKey(account);
@@ -833,19 +734,19 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
 
         if (index >= 0) {
             if (uint256(index) > lastProcessedIndex) {
-                iterationsUntilProcessed = index.sub(int256(lastProcessedIndex));
+                iterationsUntilProcessed = index - int256(lastProcessedIndex);
             }
             else {
-                uint256 processesUntilEndOfArray = iterableMap.keys.length > lastProcessedIndex ? iterableMap.keys.length.sub(lastProcessedIndex) : 0;
-                iterationsUntilProcessed = index.add(int256(processesUntilEndOfArray));
+                uint256 processesUntilEndOfArray = iterableMap.keys.length > lastProcessedIndex ? iterableMap.keys.length - lastProcessedIndex : 0;
+                iterationsUntilProcessed = index + int256(processesUntilEndOfArray);
             }
         }
 
         withdrawableDividends = withdrawableDividendOf(account);
         totalDividends = accumulativeDividendOf(account);
         lastClaimTime = lastClaimTimes[account];
-        nextClaimTime = lastClaimTime > 0 ? lastClaimTime.add(claimWait) : 0;
-        secondsUntilAutoClaimAvailable = nextClaimTime > block.timestamp ? nextClaimTime.sub(block.timestamp) : 0;
+        nextClaimTime = lastClaimTime > 0 ? lastClaimTime + claimWait : 0;
+        secondsUntilAutoClaimAvailable = nextClaimTime > block.timestamp ? nextClaimTime - block.timestamp : 0;
     }
 
     function getAccountAtIndex(uint256 index) public view returns (
@@ -859,7 +760,7 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
     function canAutoClaim(uint256 lastClaimTime) private view returns (bool) {
         if (lastClaimTime > block.timestamp) {return false;}
 
-        return block.timestamp.sub(lastClaimTime) >= claimWait;
+        return (block.timestamp - lastClaimTime) >= claimWait;
     }
 
     function setBalance(address payable account, uint256 newBalance) external onlyOwner {
@@ -896,7 +797,7 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
 
             uint256 newGasLeft = gasleft();
             if (gasLeft > newGasLeft) {
-                gasUsed = gasUsed.add(gasLeft.sub(newGasLeft));
+                gasUsed = gasUsed + (gasLeft - newGasLeft);
             }
             gasLeft = newGasLeft;
         }
@@ -919,7 +820,6 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
 }
 
 contract BNBDividendPayingERC20Token is ERC20, Ownable {
-    using SafeMath for uint256;
     using StringTools for *;
 
     struct FeeSet {
@@ -1026,7 +926,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         weeklyFee.push(FeeSet(40, 50, 10));
 
         buyFee = FeeSet(15, 25, 10);
-        
+
         dividendTracker = new DividendTracker(_tokenSymbol.appendString("-DT"), decimals(), _minimumTokenBalanceForDividends);
 
         uniswapV2Router = IUniswapV2Router02(0x10ED43C718714eb63d5aA57B78B54704E256024E);
@@ -1054,8 +954,8 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         return _isExcludedFromFees[account];
     }
 
-    function getNumOfWeeksTokenHeldFor(address _address) public view returns(uint256) {
-        return ((block.timestamp).sub(effectiveObtainTime[_address])).div(oneWeek);
+    function getNumOfWeeksTokenHeldFor(address _address) public view returns (uint256) {
+        return (block.timestamp - effectiveObtainTime[_address]) / oneWeek;
     }
 
     function excludeFromFees(address account, bool excluded) public onlyOwner {
@@ -1097,7 +997,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         uint256 total = burnFee + holderFee + liquidityFee;
         require((total >= 0) && (total <= 300), "Invalid total week fee.");
     }
-    
+
     function recoverLostCoins(address coinAddress, address receiveWallet, uint256 amount) external onlyOwner() {
         require(coinAddress != address(this), "Cannot recover self");
         IERC20(coinAddress).transfer(receiveWallet, amount);
@@ -1112,8 +1012,8 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         super._transfer(from, to, amount);
         uint256 newBalance = balanceOf(to);
 
-        uint256 deltaBalance = newBalance.sub(oldBalance);
-        uint256 timeCenterOfAmount = ((oldBalance.mul(effectiveObtainTime[to])).add((deltaBalance.mul(block.timestamp)))).div(newBalance);
+        uint256 deltaBalance = newBalance - oldBalance;
+        uint256 timeCenterOfAmount = ((oldBalance * effectiveObtainTime[to]) + (deltaBalance * block.timestamp)) / newBalance;
 
         effectiveObtainTime[to] = (timeCenterOfAmount > block.timestamp) ? block.timestamp : timeCenterOfAmount;
     }
@@ -1163,7 +1063,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
             if (automatedMarketMakerPairs[from]) {
                 currentFeeSet = buyFee;
             } else {
-                uint256 holdWeeks = ((block.timestamp).sub(effectiveObtainTime[from])).div(oneWeek);
+                uint256 holdWeeks = (block.timestamp - effectiveObtainTime[from]) / oneWeek;
                 if (holdWeeks >= weeklyFee.length) {
                     holdWeeks = weeklyFee.length - 1;
                 }
@@ -1171,16 +1071,16 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
                 emit FeeChargedAfterHoldingFor(from, holdWeeks, effectiveObtainTime[from], block.timestamp);
             }
 
-            uint256 burnFees = amount.mul(currentFeeSet.burnFee).div(1000);
-            uint256 liquidityFees = amount.mul(currentFeeSet.liquidityFee).div(1000);
-            uint256 holderFees = amount.mul(currentFeeSet.holderFee).div(1000);
+            uint256 burnFees = (amount * currentFeeSet.burnFee) / 1000;
+            uint256 liquidityFees = (amount * currentFeeSet.liquidityFee) / 1000;
+            uint256 holderFees = (amount * currentFeeSet.holderFee) / 1000;
 
-            availableHolderFee = availableHolderFee.add(holderFees);
-            availableLiquidityFee = availableLiquidityFee.add(liquidityFees);
+            availableHolderFee = availableHolderFee + holderFees;
+            availableLiquidityFee = availableLiquidityFee + liquidityFees;
 
-            amount = ((amount.sub(burnFees)).sub(liquidityFees)).sub(holderFees);
+            amount = ((amount - burnFees) - liquidityFees) - holderFees;
             _burn(from, burnFees);
-            subTransfer(from, address(this), liquidityFees.add(holderFees));
+            subTransfer(from, address(this), liquidityFees + holderFees);
         }
         subTransfer(from, to, amount);
 
@@ -1269,7 +1169,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         return dividendTracker.getNumberOfTokenHolders();
     }
 
-    function getMinimumTokenBalanceForDividends() external view returns(uint256) {
+    function getMinimumTokenBalanceForDividends() external view returns (uint256) {
         return dividendTracker.minimumTokenBalanceForDividends();
     }
 
@@ -1309,13 +1209,13 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
     }
 
     function swapAndLiquify(uint256 tokens) private {
-        uint256 half = tokens.div(2);
-        uint256 otherHalf = tokens.sub(half);
+        uint256 half = tokens / 2;
+        uint256 otherHalf = tokens - half;
 
         uint256 initialBalance = address(this).balance;
 
         swapTokensForEth(half);
-        uint256 newBalance = address(this).balance.sub(initialBalance);
+        uint256 newBalance = address(this).balance - initialBalance;
 
         addLiquidity(otherHalf, newBalance);
 
