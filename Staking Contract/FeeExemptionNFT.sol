@@ -451,8 +451,4 @@ contract NFT_ERC_721 is NFToken, Ownable {
     function burn(uint256 _tokenId) external {
         super._burn(msg.sender, _tokenId);
     }
-    
-    function getOwnerNFTCount(address _owner) external view returns (uint256) {
-        return _getOwnerNFTCount(_owner);
-    }
 }

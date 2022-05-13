@@ -36,7 +36,7 @@ interface NFTContract {
 }
 
 interface FeeExemptionNFT {
-    function getOwnerNFTCount(address _owner) external view returns (uint256);
+    function balanceOf(address _owner) external view returns (uint256);
 }
 
 library SafeMath {
@@ -642,7 +642,7 @@ contract StakingContract is Ownable {
         uint256 endTokenBalance = basicPoolInfo.stakeToken.balanceOf(address(this));
         uint256 trueDepositedTokens = endTokenBalance.sub(startTokenBalance);
 
-        if (feeExemptionNFT.getOwnerNFTCount(msg.sender) < 1) {
+        if (feeExemptionNFT.balanceOf(msg.sender) < 1) {
             uint256 depositFee = basicPoolInfo.stakeTokenDepositFee.mul(trueDepositedTokens).div(1000);
             withdrawableFee[_stakeToken] += depositFee;
             trueDepositedTokens = trueDepositedTokens.sub(depositFee);
@@ -693,7 +693,7 @@ contract StakingContract is Ownable {
             require(msg.value >= basicPoolInfo.gasAmount, "unstakeFromPool: Correct transaction value must be sent.");
 
             uint256 withdrawFee = 0;
-            if (feeExemptionNFT.getOwnerNFTCount(msg.sender) < 1) {
+            if (feeExemptionNFT.balanceOf(msg.sender) < 1) {
                 withdrawFee = basicPoolInfo.stakeTokenWithdrawFee.mul(_amount).div(1000);
                 withdrawableFee[_stakeToken] = withdrawableFee[_stakeToken].add(withdrawFee);
             }
