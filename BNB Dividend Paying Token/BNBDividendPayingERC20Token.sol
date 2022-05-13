@@ -33,12 +33,12 @@ contract Ownable is Context {
         _;
     }
 
-    function renounceOwnership() public virtual onlyOwner {
+    function renounceOwnership() external virtual onlyOwner {
         emit OwnershipTransferred(_owner, address(0));
         _owner = address(0);
     }
 
-    function transferOwnership(address newOwner) public virtual onlyOwner {
+    function transferOwnership(address newOwner) external virtual onlyOwner {
         require(newOwner != address(0), "Ownable: new owner is the zero address");
         emit OwnershipTransferred(_owner, newOwner);
         _owner = newOwner;
@@ -392,11 +392,11 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         _decimals = decimals_;
     }
 
-    function name() public view virtual override returns (string memory) {
+    function name() external view virtual override returns (string memory) {
         return _name;
     }
 
-    function symbol() public view virtual override returns (string memory) {
+    function symbol() external view virtual override returns (string memory) {
         return _symbol;
     }
 
@@ -412,16 +412,16 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         return _balances[account];
     }
 
-    function transfer(address recipient, uint256 amount) public virtual override returns (bool) {
+    function transfer(address recipient, uint256 amount) external virtual override returns (bool) {
         _transfer(_msgSender(), recipient, amount);
         return true;
     }
 
-    function allowance(address owner, address spender) public view virtual override returns (uint256) {
+    function allowance(address owner, address spender) external view virtual override returns (uint256) {
         return _allowances[owner][spender];
     }
 
-    function approve(address spender, uint256 amount) public virtual override returns (bool) {
+    function approve(address spender, uint256 amount) external virtual override returns (bool) {
         _approve(_msgSender(), spender, amount);
         return true;
     }
@@ -430,7 +430,7 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         address sender,
         address recipient,
         uint256 amount
-    ) public virtual override returns (bool) {
+    ) external virtual override returns (bool) {
         _transfer(sender, recipient, amount);
         require(_allowances[sender][_msgSender()] >= amount, "ERC20: Transfer amount exceeds allowance");
         _approve(sender, _msgSender(), _allowances[sender][_msgSender()] - amount);
@@ -494,7 +494,7 @@ contract IterableMapping {
 
     constructor() {}
 
-    function iterableMapGet(address key) public view returns (uint) {
+    function iterableMapGet(address key) external view returns (uint) {
         return iterableMap.values[key];
     }
 
@@ -598,7 +598,7 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
         }
     }
 
-    function withdrawDividend() public virtual override {
+    function withdrawDividend() external virtual override {
         _withdrawDividendOfUser(payable(_msgSender()));
     }
 
@@ -620,7 +620,7 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
         return 0;
     }
 
-    function dividendOf(address _owner) public view override returns (uint256) {
+    function dividendOf(address _owner) external view override returns (uint256) {
         return withdrawableDividendOf(_owner);
     }
 
@@ -628,7 +628,7 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
         return accumulativeDividendOf(_owner) - withdrawnDividends[_owner];
     }
 
-    function withdrawnDividendOf(address _owner) public view override returns (uint256) {
+    function withdrawnDividendOf(address _owner) external view override returns (uint256) {
         return withdrawnDividends[_owner];
     }
 
@@ -749,7 +749,7 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
         secondsUntilAutoClaimAvailable = nextClaimTime > block.timestamp ? nextClaimTime - block.timestamp : 0;
     }
 
-    function getAccountAtIndex(uint256 index) public view returns (
+    function getAccountAtIndex(uint256 index) external view returns (
         address, int256, int256, uint256, uint256, uint256, uint256, uint256) {
         if (index >= iterableMapSize()) {return (address(0), - 1, - 1, 0, 0, 0, 0, 0);}
 
@@ -777,7 +777,7 @@ contract DividendTracker is DividendPayingToken, IterableMapping, Ownable {
         processAccount(account, true);
     }
 
-    function process(uint256 gas) public returns (uint256, uint256, uint256) {
+    function process(uint256 gas) external returns (uint256, uint256, uint256) {
         uint256 numberOfTokenHolders = iterableMap.keys.length;
         if (numberOfTokenHolders == 0) {return (0, 0, lastProcessedIndex);}
 
@@ -950,11 +950,11 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
     receive() external payable {
     }
 
-    function isExcludedFromFees(address account) public view returns (bool) {
+    function isExcludedFromFees(address account) external view returns (bool) {
         return _isExcludedFromFees[account];
     }
 
-    function getNumOfWeeksTokenHeldFor(address _address) public view returns (uint256) {
+    function getNumOfWeeksTokenHeldFor(address _address) external view returns (uint256) {
         return (block.timestamp - effectiveObtainTime[_address]) / oneWeek;
     }
 
@@ -1098,7 +1098,7 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
 
     // -----------------------------Dividend Related------------------------------------- //
 
-    function updateDividendTracker(address newAddress) public onlyOwner {
+    function updateDividendTracker(address newAddress) external onlyOwner {
         require(newAddress != address(dividendTracker), "The dividend tracker already has that address");
 
         DividendTracker newDividendTracker = DividendTracker(payable(newAddress));
@@ -1116,8 +1116,9 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         dividendTracker = newDividendTracker;
     }
 
-    function updateGasForProcessing(uint256 newValue) public onlyOwner {
+    function updateGasForProcessing(uint256 newValue) external onlyOwner {
         require(newValue != gasForProcessing, "Cannot update gasForProcessing to same value");
+        require(newValue <= block.gaslimit - 500000, "New Value too High");
         emit GasForProcessingUpdated(newValue, gasForProcessing);
         gasForProcessing = newValue;
     }
@@ -1134,11 +1135,11 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
         return dividendTracker.totalDividendsDistributed();
     }
 
-    function withdrawableDividendOf(address account) public view returns (uint256) {
+    function withdrawableDividendOf(address account) external view returns (uint256) {
         return dividendTracker.withdrawableDividendOf(account);
     }
 
-    function dividendTokenBalanceOf(address account) public view returns (uint256) {
+    function dividendTokenBalanceOf(address account) external view returns (uint256) {
         return dividendTracker.balanceOf(account);
     }
 
@@ -1185,13 +1186,13 @@ contract BNBDividendPayingERC20Token is ERC20, Ownable {
 
     // -------------------------- AMM Related ------------------------------- //
 
-    function updateUniswapV2Router(address newAddress) public onlyOwner {
+    function updateUniswapV2Router(address newAddress) external onlyOwner {
         require(newAddress != address(uniswapV2Router), "The router already has that address");
         emit UpdateUniswapV2Router(newAddress, address(uniswapV2Router));
         uniswapV2Router = IUniswapV2Router02(newAddress);
     }
 
-    function setAutomatedMarketMakerPair(address pair, bool value) public onlyOwner {
+    function setAutomatedMarketMakerPair(address pair, bool value) external onlyOwner {
         require(pair != uniswapV2Pair, "The PancakeSwap pair cannot be removed from automatedMarketMakerPairs");
 
         _setAutomatedMarketMakerPair(pair, value);
