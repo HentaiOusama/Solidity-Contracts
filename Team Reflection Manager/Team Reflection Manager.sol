@@ -2,58 +2,6 @@
 
 pragma solidity >=0.8.0 <0.9.0;
 
-library SafeMath {
-  function add(uint256 a, uint256 b) internal pure returns (uint256) {
-    uint256 c = a + b;
-    require(c >= a, "SafeMath: addition overflow");
-
-    return c;
-  }
-
-  function sub(uint256 a, uint256 b) internal pure returns (uint256) {
-    return sub(a, b, "SafeMath: subtraction overflow");
-  }
-
-  function sub(uint256 a, uint256 b, string memory errorMessage) internal pure returns (uint256) {
-    require(b <= a, errorMessage);
-    uint256 c = a - b;
-
-    return c;
-  }
-
-  function mul(uint256 a, uint256 b) internal pure returns (uint256) {
-    if (a == 0) {
-      return 0;
-    }
-
-    uint256 c = a * b;
-    require(c / a == b, "SafeMath: multiplication overflow");
-
-    return c;
-  }
-
-  function div(uint256 a, uint256 b) internal pure returns (uint256) {
-    return div(a, b, "SafeMath: division by zero");
-  }
-
-  function div(uint256 a, uint256 b, string memory errorMessage) internal pure returns (uint256) {
-    require(b > 0, errorMessage);
-    uint256 c = a / b;
-    // assert(a == b * c + a % b); // There is no case in which this doesn't hold
-
-    return c;
-  }
-
-  function mod(uint256 a, uint256 b) internal pure returns (uint256) {
-    return mod(a, b, "SafeMath: modulo by zero");
-  }
-
-  function mod(uint256 a, uint256 b, string memory errorMessage) internal pure returns (uint256) {
-    require(b != 0, errorMessage);
-    return a % b;
-  }
-}
-
 interface IERC20 {
   function totalSupply() external view returns (uint256);
 
@@ -118,16 +66,15 @@ contract Ownable is Context {
 }
 
 contract TeamReflectionManager is Ownable {
-  using SafeMath for uint256;
-
   bool public canInitialize = true;
 
   DividendPayingToken public holdCoin;
   bool isCoinWithdrawalEnabled = false;
   mapping(address => bool) public selectiveWithdrawalEnabled;
 
-  address private FB = 0x9E4188a7301843744fB74aE6Bcf56003DeAD629b;
-  address private KS = 0xf7C1f4cA54D64542061E6f53A9D38E2f5A6A4Ecc;
+  address public FB = 0x9E4188a7301843744fB74aE6Bcf56003DeAD629b;
+  address public KS = 0xf7C1f4cA54D64542061E6f53A9D38E2f5A6A4Ecc;
+  address public tempStorage = address(0);
 
   mapping(address => uint256) public coinHoldingOfEachWallet;
   mapping(address => uint256) public bnbWithdrawnByWallets;
@@ -135,10 +82,15 @@ contract TeamReflectionManager is Ownable {
   uint256 public totalBNBAccumulated = 1;
   uint256 public totalCoinsPresent = 0;
 
+  event walletUpdated (
+    address oldAddress,
+    address newAddress
+  );
+
   constructor() {}
 
   receive() external payable {
-    totalBNBAccumulated = totalBNBAccumulated.add(msg.value);
+    totalBNBAccumulated += msg.value;
   }
 
   function hasSystemStarted() public view returns(bool) {
@@ -162,15 +114,15 @@ contract TeamReflectionManager is Ownable {
   function startSystem() external {
     uint256 currentBalance = holdCoin.balanceOf(address(this));
     if (!hasSystemStarted()) {
-      uint256 deficitBalance = totalCoinsPresent.sub(currentBalance);
+      uint256 deficitBalance = totalCoinsPresent - currentBalance;
       require(holdCoin.allowance(_msgSender(), address(this)) >= deficitBalance, "Insufficient allowance.");
       holdCoin.transferFrom(_msgSender(), address(this), deficitBalance);
     }
   }
 
   function getWithdrawableBNB(address _address) public view returns(uint256) {
-    uint256 totalBNBShare = (totalBNBAccumulated.mul(coinHoldingOfEachWallet[_address])).div(totalCoinsPresent);
-    return totalBNBShare.sub(bnbWithdrawnByWallets[_address]);
+    uint256 totalBNBShare = (totalBNBAccumulated * coinHoldingOfEachWallet[_address]) / totalCoinsPresent;
+    return totalBNBShare - bnbWithdrawnByWallets[_address];
   }
 
   function makeAdditionalOneCheck() internal returns(bool) {
@@ -196,15 +148,10 @@ contract TeamReflectionManager is Ownable {
     uint256 withdrawableBNB = getWithdrawableBNB(_address);
     if (withdrawableBNB > 0) {
       (bool success, ) = address(_address).call{value : withdrawableBNB}("");
-
-      if (success) {
-        bnbWithdrawnByWallets[_address] = bnbWithdrawnByWallets[_address].add(withdrawableBNB);
-      }
-
-      return success;
-    } else {
-      return true;
+      bnbWithdrawnByWallets[_address] = bnbWithdrawnByWallets[_address] + withdrawableBNB;
     }
+
+    return true;
   }
 
   function withdrawDividends() external returns(bool) {
@@ -220,33 +167,20 @@ contract TeamReflectionManager is Ownable {
   }
 
   function ostracize(address _address) external onlyOwner() {
-    require(_address != owner() && _address != FB && _address != KS, "Cannot ostracize this wallet");
+    require(_address != owner() && _address != FB && _address != KS && _address != tempStorage, "Cannot ostracize this wallet");
 
-    uint256 oneThirdCoins = coinHoldingOfEachWallet[_address].div(30);
-    uint256 oneThirdBNB = bnbWithdrawnByWallets[_address].div(30);
-
-    coinHoldingOfEachWallet[owner()] = coinHoldingOfEachWallet[owner()].add(oneThirdCoins);
-    bnbWithdrawnByWallets[owner()] = bnbWithdrawnByWallets[owner()].add(oneThirdBNB);
-    coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[_address].sub(oneThirdCoins);
-    bnbWithdrawnByWallets[_address] = bnbWithdrawnByWallets[_address].sub(oneThirdBNB);
-    coinHoldingOfEachWallet[FB] = coinHoldingOfEachWallet[FB].add(oneThirdCoins);
-    bnbWithdrawnByWallets[FB] = bnbWithdrawnByWallets[FB].add(oneThirdBNB);
-    coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[_address].sub(oneThirdCoins);
-    bnbWithdrawnByWallets[_address] = bnbWithdrawnByWallets[_address].sub(oneThirdBNB);
-    oneThirdCoins = coinHoldingOfEachWallet[_address];
-    oneThirdBNB = bnbWithdrawnByWallets[_address];
-    coinHoldingOfEachWallet[KS] = coinHoldingOfEachWallet[KS].add(oneThirdCoins);
-    bnbWithdrawnByWallets[KS] = bnbWithdrawnByWallets[KS].add(oneThirdBNB);
-    coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[_address].sub(oneThirdCoins);
-    bnbWithdrawnByWallets[_address] = bnbWithdrawnByWallets[_address].sub(oneThirdBNB);
+    coinHoldingOfEachWallet[tempStorage] = coinHoldingOfEachWallet[tempStorage] + coinHoldingOfEachWallet[_address];
+    bnbWithdrawnByWallets[tempStorage] = bnbWithdrawnByWallets[tempStorage] + bnbWithdrawnByWallets[_address];
+    coinHoldingOfEachWallet[_address] = 0;
+    bnbWithdrawnByWallets[_address] = 0;
   }
 
   function updateFBAddress(address _address) external {
     require(_address != FB, "Address needs to be different.");
     require(_msgSender() == FB, "You are not allowed to change this address");
 
-    coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[FB];
-    bnbWithdrawnByWallets[_address] = bnbWithdrawnByWallets[FB];
+    coinHoldingOfEachWallet[_address] += coinHoldingOfEachWallet[FB];
+    bnbWithdrawnByWallets[_address] += bnbWithdrawnByWallets[FB];
     coinHoldingOfEachWallet[FB] = 0;
     bnbWithdrawnByWallets[FB] = 0;
 
@@ -257,12 +191,23 @@ contract TeamReflectionManager is Ownable {
     require(_address != KS, "Address needs to be different.");
     require(_msgSender() == KS, "You are not allowed to change this address");
 
-    coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[KS];
-    bnbWithdrawnByWallets[_address] = bnbWithdrawnByWallets[KS];
+    coinHoldingOfEachWallet[_address] += coinHoldingOfEachWallet[KS];
+    bnbWithdrawnByWallets[_address] += bnbWithdrawnByWallets[KS];
     coinHoldingOfEachWallet[KS] = 0;
     bnbWithdrawnByWallets[KS] = 0;
 
     KS = _address;
+  }
+
+  function updateTempStorageAddress(address _address) external onlyOwner() {
+    require(_address != tempStorage, "Address needs to be different.");
+
+    coinHoldingOfEachWallet[_address] += coinHoldingOfEachWallet[tempStorage];
+    bnbWithdrawnByWallets[_address] += bnbWithdrawnByWallets[tempStorage];
+    coinHoldingOfEachWallet[tempStorage] = 0;
+    bnbWithdrawnByWallets[tempStorage] = 0;
+
+    tempStorage = _address;
   }
 
   function transferOwnership(address newOwner) public override onlyOwner() {
@@ -282,8 +227,8 @@ contract TeamReflectionManager is Ownable {
 
     bool success = withdrawDividends(_msgSender());
     if (success) {
-      totalCoinsPresent = totalCoinsPresent.sub(coinHoldingOfEachWallet[_msgSender()]);
-      totalBNBAccumulated = totalBNBAccumulated.sub(bnbWithdrawnByWallets[_msgSender()]);
+      totalCoinsPresent = totalCoinsPresent - coinHoldingOfEachWallet[_msgSender()];
+      totalBNBAccumulated = totalBNBAccumulated - bnbWithdrawnByWallets[_msgSender()];
 
       holdCoin.transfer(_msgSender(), coinHoldingOfEachWallet[_msgSender()]);
 
@@ -307,10 +252,21 @@ contract TeamReflectionManager is Ownable {
       selectiveWithdrawalEnabled[_address] = allowWithdrawal;
     }
 
-    uint256 catchUpBNBShare = (totalBNBAccumulated.mul(_amount)).div(totalCoinsPresent);
-    coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[_address].add(_amount);
-    bnbWithdrawnByWallets[_address] = bnbWithdrawnByWallets[_address].add(catchUpBNBShare);
-    totalBNBAccumulated = totalBNBAccumulated.add(catchUpBNBShare);
-    totalCoinsPresent = totalCoinsPresent.add(_amount);
+    uint256 catchUpBNBShare = (totalBNBAccumulated * _amount) / totalCoinsPresent;
+    coinHoldingOfEachWallet[_address] = coinHoldingOfEachWallet[_address] + _amount;
+    bnbWithdrawnByWallets[_address] = bnbWithdrawnByWallets[_address] + catchUpBNBShare;
+    totalBNBAccumulated = totalBNBAccumulated + catchUpBNBShare;
+    totalCoinsPresent = totalCoinsPresent + _amount;
+  }
+
+  function updateUserWallet(address newAddress) external {
+    coinHoldingOfEachWallet[newAddress] += coinHoldingOfEachWallet[msg.sender];
+    coinHoldingOfEachWallet[msg.sender] = 0;
+    bnbWithdrawnByWallets[newAddress] += bnbWithdrawnByWallets[msg.sender];
+    bnbWithdrawnByWallets[msg.sender] = 0;
+    selectiveWithdrawalEnabled[newAddress] = selectiveWithdrawalEnabled[newAddress] && selectiveWithdrawalEnabled[msg.sender];
+    selectiveWithdrawalEnabled[msg.sender] = false;
+
+    emit walletUpdated(msg.sender, newAddress);
   }
 }
