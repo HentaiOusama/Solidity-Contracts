@@ -554,6 +554,58 @@ interface IUniswapV2Router02 is IUniswapV2Router01 {
 }
 
 // ------------------------------------ //
+//         Supporting Contracts         //
+// ------------------------------------ //
+
+contract Ownable {
+  address internal _owner;
+
+  event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+  constructor () {
+    address msgSender = msg.sender;
+    _owner = msgSender;
+    emit OwnershipTransferred(address(0), msgSender);
+  }
+
+  function owner() public view returns (address) {
+    return _owner;
+  }
+
+  modifier onlyOwner() {
+    require(_owner == msg.sender, "Ownable: caller is not the owner");
+    _;
+  }
+
+  function transferOwnership(address newOwner) public virtual onlyOwner() {
+    require(newOwner != address(0), "Ownable: new owner is the zero address");
+    emit OwnershipTransferred(_owner, newOwner);
+    _owner = newOwner;
+  }
+}
+
+contract Authorizable is Ownable {
+  mapping(address => bool) internal _authorized;
+
+  constructor () {
+    _authorized[owner()] = true;
+  }
+
+  modifier onlyAuthorized() {
+    require(isAuthorized(msg.sender), "Only for authorized personnel");
+    _;
+  }
+
+  function setAuthorization(address _address, bool shouldAuthorize) external onlyOwner() {
+    _authorized[_address] = shouldAuthorize;
+  }
+
+  function isAuthorized(address _address) public view returns (bool) {
+    return _authorized[_address] || _address == _owner;
+  }
+}
+
+// ------------------------------------ //
 //    Testing/Implementing Contracts    //
 // ------------------------------------ //
 
